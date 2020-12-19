@@ -482,6 +482,9 @@ class AutoEncoder(nn.Module):
         elif self.dataset in {'cifar10', 'celeba_64', 'celeba_256', 'imagenet_32', 'imagenet_64', 'ffhq',
                               'lsun_bedroom_128', 'lsun_bedroom_256'}:
             return DiscMixLogistic(logits, self.num_mix_output, num_bits=self.num_bits)
+            ############################################################
+            # TODO - Here change to softmax instead of DiscMixLogistic #
+            ############################################################
         else:
             raise NotImplementedError
 

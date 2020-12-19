@@ -33,6 +33,9 @@ def main(args):
 
     # Get data loaders.
     train_queue, valid_queue, num_classes = datasets.get_loaders(args)
+    ####################################################
+    ### Check here the shape of the data received! #####
+    ####################################################
     args.num_total_iter = len(train_queue) * args.epochs
     warmup_iters = len(train_queue) * args.warmup_epochs
     swa_start = len(train_queue) * (args.epochs - 1)
@@ -58,6 +61,9 @@ def main(args):
         cnn_optimizer, float(args.epochs - args.warmup_epochs - 1), eta_min=args.learning_rate_min)
     grad_scalar = GradScaler(2**10)
 
+    ####################################################
+    ############# Here check the shape of the output ###
+    ####################################################
     num_output = utils.num_output(args.dataset)
     bpd_coeff = 1. / np.log(2.) / num_output
 
@@ -141,6 +147,9 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
     alpha_i = utils.kl_balancer_coeff(num_scales=model.num_latent_scales,
                                       groups_per_scale=model.groups_per_scale, fun='square')
     nelbo = utils.AvgrageMeter()
+
+    loss = nn.CrossEntropyLoss()
+
     model.train()
     for step, x in enumerate(train_queue):
         x = x[0] if len(x) > 1 else x
@@ -162,12 +171,18 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
         cnn_optimizer.zero_grad()
         with autocast():
             logits, log_q, log_p, kl_all, kl_diag = model(x)
-
+            ############################################################################
+            ### Here the decoder output would change to softmax instead of MixLogistic #
+            ############################################################################
             output = model.decoder_output(logits)
             kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
                                       args.kl_const_portion * args.num_total_iter, args.kl_const_coeff)
 
-            recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
+            ############################################################################
+            #### Here change from reconstruction loss to categorical cross entropy #####
+            ############################################################################
+            recon_loss = loss(output, x)
+            # recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
             balanced_kl, kl_coeffs, kl_vals = utils.kl_balancer(kl_all, kl_coeff, kl_balance=True, alpha_i=alpha_i)
 
             nelbo_batch = recon_loss + balanced_kl
@@ -213,7 +228,11 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
                               'param_groups'][0]['lr'], global_step)
             writer.add_scalar('train/nelbo_iter', loss, global_step)
             writer.add_scalar('train/kl_iter', torch.mean(sum(kl_all)), global_step)
-            writer.add_scalar('train/recon_iter', torch.mean(utils.reconstruction_loss(output, x, crop=model.crop_output)), global_step)
+            #####################################################
+            ###### Here change to categorical cross entropy #####
+            #####################################################
+            writer.add_scalar('train/recon_iter', torch.mean(loss(output, x), global_step))
+            # writer.add_scalar('train/recon_iter', torch.mean(utils.reconstruction_loss(output, x, crop=model.crop_output)), global_step)
             writer.add_scalar('kl_coeff/coeff', kl_coeff, global_step)
             total_active = 0
             for i, kl_diag_i in enumerate(kl_diag):
@@ -234,6 +253,8 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
 
 
 def test(valid_queue, model, num_samples, args, logging):
+    loss = nn.CrossEntropyLoss()
+    
     if args.distributed:
         dist.barrier()
     nelbo_avg = utils.AvgrageMeter()
@@ -251,7 +272,11 @@ def test(valid_queue, model, num_samples, args, logging):
             for k in range(num_samples):
                 logits, log_q, log_p, kl_all, _ = model(x)
                 output = model.decoder_output(logits)
-                recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
+                ####################################################
+                ## Here change to categorical cross entropy loss ###
+                ####################################################
+                recon_loss = loss(output, x)
+                # recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
                 balanced_kl, _, _ = utils.kl_balancer(kl_all, kl_balance=False)
                 nelbo_batch = recon_loss + balanced_kl
                 nelbo.append(nelbo_batch)
@@ -296,8 +321,8 @@ if __name__ == '__main__':
     # data
     parser.add_argument('--dataset', type=str, default='mnist',
                         choices=['cifar10', 'mnist', 'celeba_64', 'celeba_256',
-                                 'imagenet_32', 'ffhq', 'lsun_bedroom_128'],
-                        help='which dataset to use')
+                                 'imagenet_32', 'ffhq', 'lsun_bedroom_128', 'custom'],
+                        help='which dataset to use, custom - the special dataset')
     parser.add_argument('--data', type=str, default='/tmp/nasvae/data',
                         help='location of the data corpus')
     # optimization

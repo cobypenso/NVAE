@@ -99,6 +99,10 @@ def main(eval_args):
                 with autocast():
                     logits = model.sample(num_samples, eval_args.temp)
                 output = model.decoder_output(logits)
+                import ipdb; ipdb.set_trace()
+                ######################################################################
+                # Think how to change this line (argmax? how to sample from softmax) #
+                ######################################################################
                 output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) \
                     else output.sample()
                 torch.cuda.synchronize()

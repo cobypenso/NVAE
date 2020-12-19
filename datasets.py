@@ -14,7 +14,8 @@ import os
 import utils
 from lmdb_datasets import LMDBDataset
 from thirdparty.lsun import LSUN
-
+import numpy as np
+import h5py
 
 class Binarize(object):
     """ This class introduces a binarization transformation
@@ -53,6 +54,24 @@ def get_loaders_eval(dataset, args):
             root=args.data, train=True, download=True, transform=train_transform)
         valid_data = dset.CIFAR10(
             root=args.data, train=False, download=True, transform=valid_transform)
+        
+    elif dataset == 'custom':
+        num_classes = 1 # TODO - find out the real number of classes! #
+        directory = "./"
+        train_transform, valid_transform = _data_transforms_custom_dataset(args)
+        train, test = load_h5_dataset(directory)
+
+        pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy"
+        train_data = clusters_to_images(train,pathToCluster)
+        valid_data = clusters_to_images(test,pathToCluster)
+        ###### Check here the shape of the data ######
+        
+        #pass data throught transforms
+        train_data = train_transform(train_data)
+        valid_data = valid_transform(valid_data)
+
+        #####  Check here the shape of the data ######
+
     elif dataset == 'mnist':
         num_classes = 10
         train_transform, valid_transform = _data_transforms_mnist(args)
@@ -209,3 +228,58 @@ def _data_transforms_lsun(size):
     ])
 
     return train_transform, valid_transform
+
+def _data_transforms_custom_dataset(size):
+    """Get data transforms for the custom dataset."""
+    # The preproccessing includes clusters #
+
+    train_transform = transforms.Compose([
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor()
+    ])
+
+    valid_transform = transforms.Compose([
+        transforms.ToTensor()
+    ])
+
+    return train_transform, valid_transform
+
+
+def _process_image(image):
+    return image
+
+def load_h5_dataset(directory):
+    print(" --------------------------------- ")
+    print("Start loading Datasat from H5DF files...")
+    data = []
+    flagOneFile = 0
+    for filename in os.listdir(directory):
+        if flagOneFile:
+            break
+        if filename.endswith(".h5"):
+            with h5py.File(filename, "r") as f:
+                a_group_key = list(f.keys())[0]
+                # Get the data
+                temp = list(f[a_group_key])
+                data.append(temp[1:])
+
+                flagOneFile = 1
+            continue
+        else:
+            continue
+
+    data_flat = [item for sublist in data for item in sublist]
+    data_flat = np.stack(data_flat, axis=0)
+    precent_train_test_split = 0.7
+    train = data_flat[:int(np.floor(precent_train_test_split * data_flat.shape[0])), :]
+    test = data_flat[int(np.floor(precent_train_test_split * data_flat.shape[0])) + 1:, :]
+    print(" --------------------------------- ")
+    print("Finish loading Datasat from H5DF files...")
+
+    return train, test
+
+def clusters_to_images(samples, pathToCluster):
+    clusters = np.load(pathToCluster)
+    samples = [np.reshape(np.rint(127.5 * (clusters[s.astype(int).tolist()] + 1.0)), [32, 32, 3]).astype(np.float32) for s in samples]
+    # samples = [np.reshape(s, [32, 32, 1]).astype(np.float32) for s in samples]
+    return samples
