@@ -8,6 +8,7 @@
 """Code for getting the data loaders."""
 
 import torch
+from torch.utils.data import Dataset
 import torchvision.datasets as dset
 import torchvision.transforms as transforms
 import os
@@ -46,7 +47,7 @@ def get_loaders(args):
 
 def get_loaders_eval(dataset, args):
     """Get train and valid loaders for cifar10/tiny imagenet."""
-
+    import ipdb; ipdb.set_trace()
     if dataset == 'cifar10':
         num_classes = 10
         train_transform, valid_transform = _data_transforms_cifar10(args)
@@ -54,7 +55,7 @@ def get_loaders_eval(dataset, args):
             root=args.data, train=True, download=True, transform=train_transform)
         valid_data = dset.CIFAR10(
             root=args.data, train=False, download=True, transform=valid_transform)
-        
+        import ipdb; ipdb.set_trace()
     elif dataset == 'custom':
         num_classes = 1 # TODO - find out the real number of classes! #
         directory = "./"
@@ -62,13 +63,13 @@ def get_loaders_eval(dataset, args):
         train, test = load_h5_dataset(directory)
 
         pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy"
-        train_data = clusters_to_images(train,pathToCluster)
-        valid_data = clusters_to_images(test,pathToCluster)
+        train_data = torch.from_numpy(np.array(clusters_to_images(train,pathToCluster)))
+        valid_data = torch.from_numpy(np.array(clusters_to_images(test,pathToCluster)))
         ###### Check here the shape of the data ######
-        
+        import ipdb; ipdb.set_trace()
         #pass data throught transforms
-        train_data = train_transform(train_data)
-        valid_data = valid_transform(valid_data)
+        train_data = CustomDataset(train_data, train_transform)
+        valid_data = CustomDataset(valid_data, valid_transform)
 
         #####  Check here the shape of the data ######
 
@@ -277,6 +278,24 @@ def load_h5_dataset(directory):
     print("Finish loading Datasat from H5DF files...")
 
     return train, test
+    
+class CustomDataset(Dataset):
+
+    def __init__(self, X, transform=None):
+        self.X = X
+        self.transform = transform
+
+    def __len__(self):
+        return self.X.shape[0]
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        img = self.X[idx]
+        if self.transform:
+            img = self.transform(img)
+        import ipdb; ipdb.set_trace()
+        return img
 
 def clusters_to_images(samples, pathToCluster):
     clusters = np.load(pathToCluster)
