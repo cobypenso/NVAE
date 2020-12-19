@@ -303,6 +303,9 @@ def num_output(dataset):
         return 3 * size * size
     elif dataset == 'ffhq':
         return 3 * 256 * 256
+    ############ Check ##############
+    elif dataset == 'custom':
+        return 32 * 32
     else:
         raise NotImplementedError
 
@@ -317,6 +320,9 @@ def get_input_size(dataset):
         return size
     elif dataset == 'ffhq':
         return 256
+    ##### Check #####
+    elif dataset == 'custom':
+        return 32
     else:
         raise NotImplementedError
 
