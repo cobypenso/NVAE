@@ -110,18 +110,21 @@ def main(args):
                 for t in [0.7, 0.8, 0.9, 1.0]:
                     logits = model.sample(num_samples, t)
                     output = model.decoder_output(logits)
-                    output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) else output.sample(t)
-                    output_tiled = utils.tile_image(output_img, n)
-                    writer.add_image('generated_%0.1f' % t, output_tiled, global_step)
-
-            valid_neg_log_p, valid_nelbo = test(valid_queue, model, num_samples=10, args=args, logging=logging)
+                    if args.dataset == 'custom':
+                        output_img = utils.sample_with_tmp(output, t)
+                    else:
+                        output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) else output.sample(t)
+                        output_tiled = utils.tile_image(output_img, n)
+                        writer.add_image('generated_%0.1f' % t, output_tiled, global_step)
+            valid_nelbo = test(valid_queue, model, num_samples=10, args=args, logging=logging)
+            #valid_neg_log_p, valid_nelbo = test(valid_queue, model, num_samples=10, args=args, logging=logging)
             logging.info('valid_nelbo %f', valid_nelbo)
-            logging.info('valid neg log p %f', valid_neg_log_p)
+            #logging.info('valid neg log p %f', valid_neg_log_p)
             logging.info('valid bpd elbo %f', valid_nelbo * bpd_coeff)
-            logging.info('valid bpd log p %f', valid_neg_log_p * bpd_coeff)
-            writer.add_scalar('val/neg_log_p', valid_neg_log_p, epoch)
+            #logging.info('valid bpd log p %f', valid_neg_log_p * bpd_coeff)
+            #writer.add_scalar('val/neg_log_p', valid_neg_log_p, epoch)
             writer.add_scalar('val/nelbo', valid_nelbo, epoch)
-            writer.add_scalar('val/bpd_log_p', valid_neg_log_p * bpd_coeff, epoch)
+            #writer.add_scalar('val/bpd_log_p', valid_neg_log_p * bpd_coeff, epoch)
             writer.add_scalar('val/bpd_elbo', valid_nelbo * bpd_coeff, epoch)
 
         save_freq = int(np.ceil(args.epochs / 100))
@@ -134,12 +137,13 @@ def main(args):
                             'grad_scalar': grad_scalar.state_dict()}, checkpoint_file)
 
     # Final validation
-    valid_neg_log_p, valid_nelbo = test(valid_queue, model, num_samples=1000, args=args, logging=logging)
+    valid_nelbo = test(valid_queue, model, num_samples=1000, args=args, logging=logging)
+    #valid_neg_log_p, valid_nelbo = test(valid_queue, model, num_samples=1000, args=args, logging=logging)
     logging.info('final valid nelbo %f', valid_nelbo)
-    logging.info('final valid neg log p %f', valid_neg_log_p)
-    writer.add_scalar('val/neg_log_p', valid_neg_log_p, epoch + 1)
+    #logging.info('final valid neg log p %f', valid_neg_log_p)
+    #writer.add_scalar('val/neg_log_p', valid_neg_log_p, epoch + 1)
     writer.add_scalar('val/nelbo', valid_nelbo, epoch + 1)
-    writer.add_scalar('val/bpd_log_p', valid_neg_log_p * bpd_coeff, epoch + 1)
+    #writer.add_scalar('val/bpd_log_p', valid_neg_log_p * bpd_coeff, epoch + 1)
     writer.add_scalar('val/bpd_elbo', valid_nelbo * bpd_coeff, epoch + 1)
     writer.close()
 
@@ -180,15 +184,14 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
             if (args.dataset == 'custom'):
                 x_reshaped = x.reshape(16, -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
                 output_reshaped = output.transpose(1, 3).reshape(16, -1, 512).permute(0,2,1) # (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
-                
                 recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
-                
             else:
                 recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
-            import ipdb; ipdb.set_trace()
             balanced_kl, kl_coeffs, kl_vals = utils.kl_balancer(kl_all, kl_coeff, kl_balance=True, alpha_i=alpha_i)
-
-            nelbo_batch = recon_loss + torch.mean(balanced_kl)
+            if args.dataset == 'custom':
+                nelbo_batch = recon_loss
+            else:
+                nelbo_batch = torch.mean(recon_loss + balanced_kl)
             loss = nelbo_batch
             norm_loss = model.spectral_norm_parallel()
             bn_loss = model.batchnorm_loss()
@@ -211,13 +214,16 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
         if (global_step + 1) % 100 == 0:
             if (global_step + 1) % 1000 == 0:  # reduced frequency
                 n = int(np.floor(np.sqrt(x.size(0))))
-                x_img = x[:n*n]
-                output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) else output.sample()
-                output_img = output_img[:n*n]
-                x_tiled = utils.tile_image(x_img, n)
-                output_tiled = utils.tile_image(output_img, n)
-                in_out_tiled = torch.cat((x_tiled, output_tiled), dim=2)
-                writer.add_image('reconstruction', in_out_tiled, global_step)
+                if args.dataset == 'custom':
+                        output_img = utils.sample_with_tmp(output, 1)
+                else:
+                    x_img = x[:n*n]
+                    output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) else output.sample()
+                    output_img = output_img[:n*n]
+                    x_tiled = utils.tile_image(x_img, n)
+                    output_tiled = utils.tile_image(output_img, n)
+                    in_out_tiled = torch.cat((x_tiled, output_tiled), dim=2)
+                    writer.add_image('reconstruction', in_out_tiled, global_step)
 
             # norm
             writer.add_scalar('train/norm_loss', norm_loss, global_step)
@@ -232,7 +238,7 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
             writer.add_scalar('train/nelbo_iter', loss, global_step)
             writer.add_scalar('train/kl_iter', torch.mean(sum(kl_all)), global_step)
             if args.dataset == 'custom':
-                writer.add_scalar('train/recon_iter', torch.mean(loss(output, x), global_step))
+                writer.add_scalar('train/recon_iter', loss, global_step)
             else:
                 writer.add_scalar('train/recon_iter', torch.mean(utils.reconstruction_loss(output, x, crop=model.crop_output)), global_step)
             writer.add_scalar('kl_coeff/coeff', kl_coeff, global_step)
@@ -255,15 +261,16 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
 
 
 def test(valid_queue, model, num_samples, args, logging):
-    loss = nn.CrossEntropyLoss()
+    loss_crossentropy = nn.CrossEntropyLoss()
     
     if args.distributed:
         dist.barrier()
     nelbo_avg = utils.AvgrageMeter()
-    neg_log_p_avg = utils.AvgrageMeter()
+    #neg_log_p_avg = utils.AvgrageMeter()
     model.eval()
     for step, x in enumerate(valid_queue):
-        x = x[0] if len(x) > 1 else x
+        if args.dataset != 'custom':
+            x = x[0] if len(x) > 1 else x
         x = x.cuda()
 
         # change bit length
@@ -275,27 +282,36 @@ def test(valid_queue, model, num_samples, args, logging):
                 logits, log_q, log_p, kl_all, _ = model(x)
                 output = model.decoder_output(logits)
                 if args.dataset == 'custom':
-                    recon_loss = loss(output, x)
+                    x_reshaped = x.reshape(16, -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
+                    output_reshaped = output.transpose(1, 3).reshape(16, -1, 512).permute(0,2,1) # (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
+                    recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
                 else:
                     recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
                 balanced_kl, _, _ = utils.kl_balancer(kl_all, kl_balance=False)
-                nelbo_batch = recon_loss + balanced_kl
+                if args.dataset == 'custom':
+                    nelbo_batch = recon_loss
+                else:
+                    nelbo_batch = torch.mean(recon_loss + balanced_kl)
                 nelbo.append(nelbo_batch)
-                log_iw.append(utils.log_iw(output, x, log_q, log_p, crop=model.crop_output))
-
-            nelbo = torch.mean(torch.stack(nelbo, dim=1))
-            log_p = torch.mean(torch.logsumexp(torch.stack(log_iw, dim=1), dim=1) - np.log(num_samples))
+                #log_iw.append(utils.log_iw(output, x, log_q, log_p, crop=model.crop_output))
+            
+            if args.dataset == 'custom':
+                nelbo = torch.mean(torch.stack(nelbo, dim=0))
+            else:
+                nelbo = torch.mean(torch.stack(nelbo, dim=1))
+            #log_p = torch.mean(torch.logsumexp(torch.stack(log_iw, dim=1), dim=1) - np.log(num_samples))
 
         nelbo_avg.update(nelbo.data, x.size(0))
-        neg_log_p_avg.update(- log_p.data, x.size(0))
+        #neg_log_p_avg.update(- log_p.data, x.size(0))
 
     utils.average_tensor(nelbo_avg.avg, args.distributed)
-    utils.average_tensor(neg_log_p_avg.avg, args.distributed)
+    #utils.average_tensor(neg_log_p_avg.avg, args.distributed)
     if args.distributed:
         # block to sync
         dist.barrier()
-    logging.info('val, step: %d, NELBO: %f, neg Log p %f', step, nelbo_avg.avg, neg_log_p_avg.avg)
-    return neg_log_p_avg.avg, nelbo_avg.avg
+    logging.info('val, step: %d, NELBO: %f', step, nelbo_avg.avg)
+    return nelbo_avg.avg
+    #return neg_log_p_avg.avg, nelbo_avg.avg
 
 
 def init_processes(rank, size, fn, args):
