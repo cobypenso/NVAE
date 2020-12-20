@@ -81,11 +81,9 @@ def main(eval_args):
         num_output = utils.num_output(args.dataset)
         bpd_coeff = 1. / np.log(2.) / num_output
 
-        valid_neg_log_p, valid_nelbo = test(valid_queue, model, num_samples=eval_args.num_iw_samples, args=args, logging=logging)
+        valid_nelbo = test(valid_queue, model, num_samples=eval_args.num_iw_samples, args=args, logging=logging)
         logging.info('final valid nelbo %f', valid_nelbo)
-        logging.info('final valid neg log p %f', valid_neg_log_p)
         logging.info('final valid nelbo in bpd %f', valid_nelbo * bpd_coeff)
-        logging.info('final valid neg log p in bpd %f', valid_neg_log_p * bpd_coeff)
 
     else:
         bn_eval_mode = not eval_args.readjust_bn
@@ -99,19 +97,19 @@ def main(eval_args):
                 with autocast():
                     logits = model.sample(num_samples, eval_args.temp)
                 output = model.decoder_output(logits)
-                import ipdb; ipdb.set_trace()
-                ######################################################################
-                # Think how to change this line (argmax? how to sample from softmax) #
-                ######################################################################
-                output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) \
-                    else output.sample()
+                if args.dataset == 'custom':
+                    output_img = utils.sample_with_tmp(output, t)
+                    output_img = utils.tile_image(output_img.unsqueeze(1), n)
+                else:
+                    output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) \
+                        else output.sample()
+                    output_tiled = utils.tile_image(output_img, n).cpu().numpy().transpose(1, 2, 0)
+                    output_tiled = np.asarray(output_tiled * 255, dtype=np.uint8)
+                    output_tiled = np.squeeze(output_tiled)
                 torch.cuda.synchronize()
                 end = time()
-
-                output_tiled = utils.tile_image(output_img, n).cpu().numpy().transpose(1, 2, 0)
+                
                 logging.info('sampling time per batch: %0.3f sec', (end - start))
-                output_tiled = np.asarray(output_tiled * 255, dtype=np.uint8)
-                output_tiled = np.squeeze(output_tiled)
 
                 plt.imshow(output_tiled)
                 plt.show()

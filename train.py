@@ -11,6 +11,7 @@ import torch.nn as nn
 import numpy as np
 import os
 
+import matplotlib.pyplot as plt
 import torch.distributed as dist
 from torch.multiprocessing import Process
 from torch.cuda.amp import autocast, GradScaler
@@ -33,9 +34,7 @@ def main(args):
 
     # Get data loaders.
     train_queue, valid_queue, num_classes = datasets.get_loaders(args)
-    ####################################################
-    ### Check here the shape of the data received! #####
-    ####################################################
+
     args.num_total_iter = len(train_queue) * args.epochs
     warmup_iters = len(train_queue) * args.warmup_epochs
     swa_start = len(train_queue) * (args.epochs - 1)
@@ -61,9 +60,6 @@ def main(args):
         cnn_optimizer, float(args.epochs - args.warmup_epochs - 1), eta_min=args.learning_rate_min)
     grad_scalar = GradScaler(2**10)
 
-    ####################################################
-    ############# Here check the shape of the output ###
-    ####################################################
     num_output = utils.num_output(args.dataset)
     bpd_coeff = 1. / np.log(2.) / num_output
 
@@ -111,20 +107,19 @@ def main(args):
                     logits = model.sample(num_samples, t)
                     output = model.decoder_output(logits)
                     if args.dataset == 'custom':
-                        output_img = utils.sample_with_tmp(output, t)
+                        output_img = utils.sample_from_softmax(output)
+                        output_tiled = utils.tile_image(output_img.unsqueeze(1), n)
+                        writer.add_image('generated_%0.1f' % t, output_tiled, global_step)
+                        plt.imshow(output_tiled.squeeze().cpu().numpy())
+                        plt.savefig("./img/sample_epoch{}-temp{}.png".format(epoch, t))
                     else:
                         output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) else output.sample(t)
                         output_tiled = utils.tile_image(output_img, n)
                         writer.add_image('generated_%0.1f' % t, output_tiled, global_step)
             valid_nelbo = test(valid_queue, model, num_samples=10, args=args, logging=logging)
-            #valid_neg_log_p, valid_nelbo = test(valid_queue, model, num_samples=10, args=args, logging=logging)
             logging.info('valid_nelbo %f', valid_nelbo)
-            #logging.info('valid neg log p %f', valid_neg_log_p)
             logging.info('valid bpd elbo %f', valid_nelbo * bpd_coeff)
-            #logging.info('valid bpd log p %f', valid_neg_log_p * bpd_coeff)
-            #writer.add_scalar('val/neg_log_p', valid_neg_log_p, epoch)
             writer.add_scalar('val/nelbo', valid_nelbo, epoch)
-            #writer.add_scalar('val/bpd_log_p', valid_neg_log_p * bpd_coeff, epoch)
             writer.add_scalar('val/bpd_elbo', valid_nelbo * bpd_coeff, epoch)
 
         save_freq = int(np.ceil(args.epochs / 100))
@@ -138,12 +133,8 @@ def main(args):
 
     # Final validation
     valid_nelbo = test(valid_queue, model, num_samples=1000, args=args, logging=logging)
-    #valid_neg_log_p, valid_nelbo = test(valid_queue, model, num_samples=1000, args=args, logging=logging)
     logging.info('final valid nelbo %f', valid_nelbo)
-    #logging.info('final valid neg log p %f', valid_neg_log_p)
-    #writer.add_scalar('val/neg_log_p', valid_neg_log_p, epoch + 1)
     writer.add_scalar('val/nelbo', valid_nelbo, epoch + 1)
-    #writer.add_scalar('val/bpd_log_p', valid_neg_log_p * bpd_coeff, epoch + 1)
     writer.add_scalar('val/bpd_elbo', valid_nelbo * bpd_coeff, epoch + 1)
     writer.close()
 
@@ -215,7 +206,8 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
             if (global_step + 1) % 1000 == 0:  # reduced frequency
                 n = int(np.floor(np.sqrt(x.size(0))))
                 if args.dataset == 'custom':
-                        output_img = utils.sample_with_tmp(output, 1)
+                        output_img = utils.sample_from_softmax(output)
+                        output_tiled = utils.tile_image(output_img.unsqueeze(1), n)
                 else:
                     x_img = x[:n*n]
                     output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) else output.sample()
@@ -293,25 +285,20 @@ def test(valid_queue, model, num_samples, args, logging):
                 else:
                     nelbo_batch = torch.mean(recon_loss + balanced_kl)
                 nelbo.append(nelbo_batch)
-                #log_iw.append(utils.log_iw(output, x, log_q, log_p, crop=model.crop_output))
             
             if args.dataset == 'custom':
                 nelbo = torch.mean(torch.stack(nelbo, dim=0))
             else:
                 nelbo = torch.mean(torch.stack(nelbo, dim=1))
-            #log_p = torch.mean(torch.logsumexp(torch.stack(log_iw, dim=1), dim=1) - np.log(num_samples))
 
         nelbo_avg.update(nelbo.data, x.size(0))
-        #neg_log_p_avg.update(- log_p.data, x.size(0))
 
     utils.average_tensor(nelbo_avg.avg, args.distributed)
-    #utils.average_tensor(neg_log_p_avg.avg, args.distributed)
     if args.distributed:
         # block to sync
         dist.barrier()
     logging.info('val, step: %d, NELBO: %f', step, nelbo_avg.avg)
     return nelbo_avg.avg
-    #return neg_log_p_avg.avg, nelbo_avg.avg
 
 
 def init_processes(rank, size, fn, args):

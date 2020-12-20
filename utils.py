@@ -248,7 +248,7 @@ def reconstruction_loss(decoder, x, crop=False):
 
 
 def tile_image(batch_image, n):
-    import ipdb; ipdb.set_trace()
+    
     assert n * n == batch_image.size(0)
     channels, height, width = batch_image.size(1), batch_image.size(2), batch_image.size(3)
     batch_image = batch_image.view(n, n, channels, height, width)
@@ -485,7 +485,21 @@ def groups_per_scale(num_scales, num_groups_per_scale, is_adaptive, divider=2, m
             n = max(minimum_groups, n)
     return g
     
-def sample_with_tmp(softmax, t):
-    probs = torch.multinomial(softmax.permute(0,2,3,1).reshape(-1, 512), 1).reshape(16, 32, 32)
-    return probs
+def sample_from_softmax(softmax):
+    return torch.multinomial(softmax.permute(0,2,3,1).reshape(-1, 512), 1).reshape(16, 32, 32)
     
+def visualize_compare(x, y):
+    
+    for i in range(x.shape[0]):
+        _,ax = plt.subplots(2)
+        ax[0] = plt.imshow(x)
+        ax[1] = plt.imshow(y)
+        plt.show()
+        
+def visualize(x):
+    
+    _, ax = plt.subplots(x.shape[0])
+    for i in range(x.shape[0]):
+        ax[i].imshow(x[i])
+    plt.show()
+        
