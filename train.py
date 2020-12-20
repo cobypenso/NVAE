@@ -171,18 +171,15 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
         cnn_optimizer.zero_grad()
         with autocast():
             logits, log_q, log_p, kl_all, kl_diag = model(x)
-            ############################################################################
-            ### Here the decoder output would change to softmax instead of MixLogistic #
-            ############################################################################
+
             output = model.decoder_output(logits)
             kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
                                       args.kl_const_portion * args.num_total_iter, args.kl_const_coeff)
 
-            ############################################################################
-            #### Here change from reconstruction loss to categorical cross entropy #####
-            ############################################################################
-            recon_loss = loss(output, x)
-            # recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
+            if (args.dataset == 'custom'):
+                recon_loss = loss(output, x)
+            else:
+                recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
             balanced_kl, kl_coeffs, kl_vals = utils.kl_balancer(kl_all, kl_coeff, kl_balance=True, alpha_i=alpha_i)
 
             nelbo_batch = recon_loss + balanced_kl
@@ -228,11 +225,10 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
                               'param_groups'][0]['lr'], global_step)
             writer.add_scalar('train/nelbo_iter', loss, global_step)
             writer.add_scalar('train/kl_iter', torch.mean(sum(kl_all)), global_step)
-            #####################################################
-            ###### Here change to categorical cross entropy #####
-            #####################################################
-            writer.add_scalar('train/recon_iter', torch.mean(loss(output, x), global_step))
-            # writer.add_scalar('train/recon_iter', torch.mean(utils.reconstruction_loss(output, x, crop=model.crop_output)), global_step)
+            if args.dataset == 'custom':
+                writer.add_scalar('train/recon_iter', torch.mean(loss(output, x), global_step))
+            else:
+                writer.add_scalar('train/recon_iter', torch.mean(utils.reconstruction_loss(output, x, crop=model.crop_output)), global_step)
             writer.add_scalar('kl_coeff/coeff', kl_coeff, global_step)
             total_active = 0
             for i, kl_diag_i in enumerate(kl_diag):
@@ -272,11 +268,10 @@ def test(valid_queue, model, num_samples, args, logging):
             for k in range(num_samples):
                 logits, log_q, log_p, kl_all, _ = model(x)
                 output = model.decoder_output(logits)
-                ####################################################
-                ## Here change to categorical cross entropy loss ###
-                ####################################################
-                recon_loss = loss(output, x)
-                # recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
+                if args.dataset == 'custom':
+                    recon_loss = loss(output, x)
+                else:
+                    recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
                 balanced_kl, _, _ = utils.kl_balancer(kl_all, kl_balance=False)
                 nelbo_batch = recon_loss + balanced_kl
                 nelbo.append(nelbo_batch)
