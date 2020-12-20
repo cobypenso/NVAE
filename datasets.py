@@ -145,7 +145,6 @@ def get_loaders_eval(dataset, args):
         valid_data, batch_size=args.batch_size,
         shuffle=(valid_sampler is None),
         sampler=valid_sampler, pin_memory=True, num_workers=1, drop_last=False)
-    import ipdb; ipdb.set_trace()
     return train_queue, valid_queue, num_classes
 
 
