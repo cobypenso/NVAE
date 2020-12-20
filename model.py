@@ -331,6 +331,7 @@ class AutoEncoder(nn.Module):
                              Conv2D(C_in, C_out, 3, padding=1, bias=True))
 
     def forward(self, x):
+        import ipdb; ipdb.set_trace()
         s = self.stem(2 * x - 1.0)
 
         # perform pre-processing
