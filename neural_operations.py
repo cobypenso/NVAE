@@ -114,6 +114,7 @@ class Conv2D(nn.Conv2d):
         self.weight_normalized = self.normalize_weight()
 
         bias = self.bias
+        
         return F.conv2d(x, self.weight_normalized, bias, self.stride,
                         self.padding, self.dilation, self.groups)
 

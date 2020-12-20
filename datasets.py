@@ -58,7 +58,7 @@ def get_loaders_eval(dataset, args):
             root=args.data, train=True, download=True, transform=train_transform)
         valid_data = dset.CIFAR10(
             root=args.data, train=False, download=True, transform=valid_transform)
-        import ipdb; ipdb.set_trace()
+        
     elif dataset == 'custom':
         num_classes = 1 # TODO - find out the real number of classes! #
         directory = "./"
@@ -69,8 +69,8 @@ def get_loaders_eval(dataset, args):
         # train_data = clusters_to_images(train_data,pathToCluster)
         # valid_data = clusters_to_images(valid_data,pathToCluster)
         #pass data throught transforms
-        train_data = CustomDataset(train_data, train_transform)
-        valid_data = CustomDataset(valid_data, valid_transform)
+        train_data = CustomDataset(train_data, None)
+        valid_data = CustomDataset(valid_data, None)
 
     elif dataset == 'mnist':
         num_classes = 10

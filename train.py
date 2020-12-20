@@ -176,7 +176,7 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
             output = model.decoder_output(logits)
             kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
                                       args.kl_const_portion * args.num_total_iter, args.kl_const_coeff)
-
+            import ipdb; ipdb.set_trace()
             if (args.dataset == 'custom'):
                 recon_loss = loss(output, x)
             else:

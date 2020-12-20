@@ -330,7 +330,7 @@ class AutoEncoder(nn.Module):
         if self.dataset == 'mnist':
             C_out = 1
         elif self.dataset == 'custom':
-            C_out = 2 ** self.num_bits
+            C_out = 512
         else:
             C_out = 10 * self.num_mix_output
        # C_out = 1 if self.dataset == 'mnist' else 10 * self.num_mix_output
@@ -338,8 +338,10 @@ class AutoEncoder(nn.Module):
                              Conv2D(C_in, C_out, 3, padding=1, bias=True))
 
     def forward(self, x):
+        
         if self.dataset == 'custom':
             x = self.cluster_to_image(x)
+            x = x.transpose(1, 3)
         s = self.stem(2 * x - 1.0)
 
         # perform pre-processing
@@ -496,7 +498,6 @@ class AutoEncoder(nn.Module):
             ############################################################
         elif self.dataset == 'custom':
             softmax = nn.Softmax(dim=1)(logits)
-            import ipdb; ipdb.set_trace()
             return softmax
         else:
             raise NotImplementedError
@@ -549,4 +550,6 @@ class AutoEncoder(nn.Module):
 
     def cluster_to_image(self, x):
         pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy"
-        return datasets.clusters_to_images(x,pathToCluster)
+        if (isinstance(x, torch.Tensor)):
+            tmp = x.cpu().numpy()
+        return torch.Tensor(datasets.clusters_to_images(tmp, pathToCluster)).cuda()
