@@ -95,6 +95,7 @@ def main(args):
         logging.info('epoch %d', epoch)
 
         # Training.
+        
         train_nelbo, global_step = train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging)
         logging.info('train_nelbo %f', train_nelbo)
         writer.add_scalar('train/nelbo', train_nelbo, global_step)
@@ -152,7 +153,8 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
 
     model.train()
     for step, x in enumerate(train_queue):
-        x = x[0] if len(x) > 1 else x
+        if args.dataset != 'custom':
+            x = x[0] if len(x) > 1 else x
         x = x.cuda()
 
         # change bit length

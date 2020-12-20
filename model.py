@@ -169,7 +169,7 @@ class AutoEncoder(nn.Module):
             self.dec_tower, mult = self.init_decoder_tower(mult)
 
         self.post_process, mult = self.init_post_process(mult)
-
+        
         self.image_conditional = self.init_image_conditional(mult)
 
         # collect all norm params in Conv2D and gamma param in batchnorm
@@ -326,12 +326,17 @@ class AutoEncoder(nn.Module):
 
     def init_image_conditional(self, mult):
         C_in = int(self.num_channels_dec * mult)
-        C_out = 1 if self.dataset == 'mnist' else 10 * self.num_mix_output
+        if self.dataset == 'mnist':
+            C_out = 1
+        elif self.dataset == 'custom':
+            C_out = 2 ** self.num_bits
+        else:
+            C_out = 10 * self.num_mix_output
+       # C_out = 1 if self.dataset == 'mnist' else 10 * self.num_mix_output
         return nn.Sequential(nn.ELU(),
                              Conv2D(C_in, C_out, 3, padding=1, bias=True))
 
     def forward(self, x):
-        import ipdb; ipdb.set_trace()
         s = self.stem(2 * x - 1.0)
 
         # perform pre-processing
@@ -486,6 +491,10 @@ class AutoEncoder(nn.Module):
             ############################################################
             # TODO - Here change to softmax instead of DiscMixLogistic #
             ############################################################
+        elif self.dataset == 'custom':
+            softmax = nn.Softmax(dim=1)(logits)
+            import ipdb; ipdb.set_trace()
+            return softmax
         else:
             raise NotImplementedError
 
