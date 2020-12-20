@@ -150,13 +150,12 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
     nelbo = utils.AvgrageMeter()
 
     loss = nn.CrossEntropyLoss()
-
+    
     model.train()
     for step, x in enumerate(train_queue):
         if args.dataset != 'custom':
             x = x[0] if len(x) > 1 else x
         x = x.cuda()
-
         # change bit length
         x = utils.pre_process(x, args.num_x_bits)
 

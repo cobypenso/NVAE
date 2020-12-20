@@ -63,11 +63,11 @@ def get_loaders_eval(dataset, args):
         num_classes = 1 # TODO - find out the real number of classes! #
         directory = "./"
         train_transform, valid_transform = _data_transforms_custom_dataset(args)
-        train, test = load_h5_dataset(directory)
+        train_data, valid_data = load_h5_dataset(directory)
 
-        pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy"
-        train_data = clusters_to_images(train,pathToCluster)
-        valid_data = clusters_to_images(test,pathToCluster)
+        # pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy"
+        # train_data = clusters_to_images(train_data,pathToCluster)
+        # valid_data = clusters_to_images(valid_data,pathToCluster)
         #pass data throught transforms
         train_data = CustomDataset(train_data, train_transform)
         valid_data = CustomDataset(valid_data, valid_transform)

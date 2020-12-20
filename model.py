@@ -19,6 +19,7 @@ from torch.distributions.bernoulli import Bernoulli
 from utils import get_stride_for_cell_type, get_input_size, groups_per_scale
 from distributions import Normal, DiscMixLogistic
 from thirdparty.inplaced_sync_batchnorm import SyncBatchNormSwish
+import datasets
 
 CHANNEL_MULT = 2
 
@@ -337,6 +338,8 @@ class AutoEncoder(nn.Module):
                              Conv2D(C_in, C_out, 3, padding=1, bias=True))
 
     def forward(self, x):
+        if self.dataset == 'custom':
+            x = self.cluster_to_image(x)
         s = self.stem(2 * x - 1.0)
 
         # perform pre-processing
@@ -543,3 +546,7 @@ class AutoEncoder(nn.Module):
                 loss += torch.max(torch.abs(l.weight))
 
         return loss
+
+    def cluster_to_image(self, x):
+        pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy"
+        return datasets.clusters_to_images(x,pathToCluster)
