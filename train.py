@@ -149,7 +149,7 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
                                       groups_per_scale=model.groups_per_scale, fun='square')
     nelbo = utils.AvgrageMeter()
 
-    loss = nn.CrossEntropyLoss()
+    loss_crossentropy = nn.CrossEntropyLoss()
     
     model.train()
     for step, x in enumerate(train_queue):
@@ -176,15 +176,20 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
             output = model.decoder_output(logits)
             kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
                                       args.kl_const_portion * args.num_total_iter, args.kl_const_coeff)
-            import ipdb; ipdb.set_trace()
+            
             if (args.dataset == 'custom'):
-                recon_loss = loss(output, x)
+                x_reshaped = x.reshape(16, -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
+                output_reshaped = output.transpose(1, 3).reshape(16, -1, 512).permute(0,2,1) # (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
+                
+                recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
+                
             else:
                 recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
+            import ipdb; ipdb.set_trace()
             balanced_kl, kl_coeffs, kl_vals = utils.kl_balancer(kl_all, kl_coeff, kl_balance=True, alpha_i=alpha_i)
 
-            nelbo_batch = recon_loss + balanced_kl
-            loss = torch.mean(nelbo_batch)
+            nelbo_batch = recon_loss + torch.mean(balanced_kl)
+            loss = nelbo_batch
             norm_loss = model.spectral_norm_parallel()
             bn_loss = model.batchnorm_loss()
             # get spectral regularization coefficient (lambda)
