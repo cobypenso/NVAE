@@ -17,6 +17,7 @@ from lmdb_datasets import LMDBDataset
 from thirdparty.lsun import LSUN
 import numpy as np
 import h5py
+from PIL import Image
 
 class Binarize(object):
     """ This class introduces a binarization transformation
@@ -289,12 +290,11 @@ class CustomDataset(Dataset):
         return self.X.shape[0]
 
     def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
         img = self.X[idx]
+        img = Image.fromarray(img)
+
         if self.transform:
             img = self.transform(img)
-        import ipdb; ipdb.set_trace()
         return img
 
 def clusters_to_images(samples, pathToCluster):
