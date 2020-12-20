@@ -11,6 +11,7 @@ import torch
 from torch.utils.data import Dataset
 import torchvision.datasets as dset
 import torchvision.transforms as transforms
+from torchvision.datasets import VisionDataset
 import os
 import utils
 from lmdb_datasets import LMDBDataset
@@ -18,6 +19,7 @@ from thirdparty.lsun import LSUN
 import numpy as np
 import h5py
 from PIL import Image
+
 
 class Binarize(object):
     """ This class introduces a binarization transformation
@@ -48,7 +50,7 @@ def get_loaders(args):
 
 def get_loaders_eval(dataset, args):
     """Get train and valid loaders for cifar10/tiny imagenet."""
-    import ipdb; ipdb.set_trace()
+    
     if dataset == 'cifar10':
         num_classes = 10
         train_transform, valid_transform = _data_transforms_cifar10(args)
@@ -64,15 +66,11 @@ def get_loaders_eval(dataset, args):
         train, test = load_h5_dataset(directory)
 
         pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy"
-        train_data = torch.from_numpy(np.array(clusters_to_images(train,pathToCluster)))
-        valid_data = torch.from_numpy(np.array(clusters_to_images(test,pathToCluster)))
-        ###### Check here the shape of the data ######
-        import ipdb; ipdb.set_trace()
+        train_data = clusters_to_images(train,pathToCluster)
+        valid_data = clusters_to_images(test,pathToCluster)
         #pass data throught transforms
         train_data = CustomDataset(train_data, train_transform)
         valid_data = CustomDataset(valid_data, valid_transform)
-
-        #####  Check here the shape of the data ######
 
     elif dataset == 'mnist':
         num_classes = 10
@@ -147,7 +145,7 @@ def get_loaders_eval(dataset, args):
         valid_data, batch_size=args.batch_size,
         shuffle=(valid_sampler is None),
         sampler=valid_sampler, pin_memory=True, num_workers=1, drop_last=False)
-
+    import ipdb; ipdb.set_trace()
     return train_queue, valid_queue, num_classes
 
 
@@ -236,8 +234,8 @@ def _data_transforms_custom_dataset(size):
     # The preproccessing includes clusters #
 
     train_transform = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor()
+        transforms.ToTensor(),
+        transforms.RandomHorizontalFlip()
     ])
 
     valid_transform = transforms.Compose([
@@ -280,18 +278,17 @@ def load_h5_dataset(directory):
 
     return train, test
     
-class CustomDataset(Dataset):
+class CustomDataset(VisionDataset):
 
     def __init__(self, X, transform=None):
         self.X = X
         self.transform = transform
 
     def __len__(self):
-        return self.X.shape[0]
+        return len(self.X)
 
     def __getitem__(self, idx):
         img = self.X[idx]
-        img = Image.fromarray(img)
 
         if self.transform:
             img = self.transform(img)
