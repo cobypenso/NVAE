@@ -342,7 +342,8 @@ class AutoEncoder(nn.Module):
         # before the rest of the original net
         if self.dataset == 'custom':
             x = self.cluster_to_image(x)
-            x = x.transpose(1, 3)
+            x = x.transpose(1, 3) # bt,32,32,3
+            #TODO - visualize#
 
         s = self.stem(2 * x - 1.0)
 
@@ -496,6 +497,7 @@ class AutoEncoder(nn.Module):
                               'lsun_bedroom_128', 'lsun_bedroom_256'}:
             return DiscMixLogistic(logits, self.num_mix_output, num_bits=self.num_bits)
         elif self.dataset == 'custom':
+            #### TODO ####
             softmax = nn.Softmax(dim=1)(logits / temp)
             return softmax
         else:
@@ -544,7 +546,6 @@ class AutoEncoder(nn.Module):
         for l in self.all_bn_layers:
             if l.affine:
                 loss += torch.max(torch.abs(l.weight))
-
         return loss
 
     def cluster_to_image(self, x):

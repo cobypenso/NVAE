@@ -98,8 +98,9 @@ def main(eval_args):
                     logits = model.sample(num_samples, eval_args.temp)
                 output = model.decoder_output(logits)
                 if args.dataset == 'custom':
-                    output_img = utils.sample_with_tmp(output, t)
-                    output_img = utils.tile_image(output_img.unsqueeze(1), n)
+                    output_img = utils.sample_with_tmp(output)
+                    output_img = model.cluster_to_image(output_img)
+                    output_img = utils.tile_image(output_img, n)
                 else:
                     output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) \
                         else output.sample()
@@ -112,7 +113,7 @@ def main(eval_args):
                 logging.info('sampling time per batch: %0.3f sec', (end - start))
 
                 plt.imshow(output_tiled)
-                plt.show()
+                plt.savefig("img/evaluate.png")
 
 
 if __name__ == '__main__':

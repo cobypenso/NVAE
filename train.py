@@ -107,7 +107,8 @@ def main(args):
                     output = model.decoder_output(logits)
                     if args.dataset == 'custom':
                         output_img = utils.sample_from_softmax(output)
-                        output_tiled = utils.tile_image(output_img.unsqueeze(1), n)
+                        output_img = model.cluster_to_image(output_img)
+                        output_tiled = utils.tile_image(output_img, n)
                         writer.add_image('generated_%0.1f' % t, output_tiled, global_step)
                         plt.imshow(output_tiled.squeeze().cpu().numpy())
                         plt.savefig("./img/sample_epoch{}-temp{}.png".format(epoch, t))
@@ -155,13 +156,11 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
         x = x.cuda()
         # change bit length
         x = utils.pre_process(x, args.num_x_bits)
-
         # warm-up lr
         if global_step < warmup_iters:
             lr = args.learning_rate * float(global_step) / warmup_iters
             for param_group in cnn_optimizer.param_groups:
                 param_group['lr'] = lr
-
         # sync parameters, it may not be necessary
         if step % 100 == 0:
             utils.average_params(model.parameters(), args.distributed)
@@ -169,34 +168,31 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
         cnn_optimizer.zero_grad()
         with autocast():
             logits, log_q, log_p, kl_all, kl_diag = model(x)
-
             output = model.decoder_output(logits)
-            kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
-                                      args.kl_const_portion * args.num_total_iter, args.kl_const_coeff)
             
             if (args.dataset == 'custom'):
                 x_reshaped = x.reshape(16, -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
                 output_reshaped = output.transpose(1, 3).reshape(16, -1, 512).permute(0,2,1) # (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
                 recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
-                nelbo_batch = recon_loss
+                loss = recon_loss
             else:
+                kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
+                                        args.kl_const_portion * args.num_total_iter, args.kl_const_coeff)    
                 recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
                 balanced_kl, kl_coeffs, kl_vals = utils.kl_balancer(kl_all, kl_coeff, kl_balance=True, alpha_i=alpha_i)
                 nelbo_batch = torch.mean(recon_loss + balanced_kl)
-            
-            loss = nelbo_batch
-            norm_loss = model.spectral_norm_parallel()
-            bn_loss = model.batchnorm_loss()
+                norm_loss = model.spectral_norm_parallel()
+                bn_loss = model.batchnorm_loss()
+                loss = nelbo_batch
+                # get spectral regularization coefficient (lambda)
+                if args.weight_decay_norm_anneal:
+                    assert args.weight_decay_norm_init > 0 and args.weight_decay_norm > 0, 'init and final wdn should be positive.'
+                    wdn_coeff = (1. - kl_coeff) * np.log(args.weight_decay_norm_init) + kl_coeff * np.log(args.weight_decay_norm)
+                    wdn_coeff = np.exp(wdn_coeff)
+                else:
+                    wdn_coeff = args.weight_decay_norm
 
-            # get spectral regularization coefficient (lambda)
-            if args.weight_decay_norm_anneal:
-                assert args.weight_decay_norm_init > 0 and args.weight_decay_norm > 0, 'init and final wdn should be positive.'
-                wdn_coeff = (1. - kl_coeff) * np.log(args.weight_decay_norm_init) + kl_coeff * np.log(args.weight_decay_norm)
-                wdn_coeff = np.exp(wdn_coeff)
-            else:
-                wdn_coeff = args.weight_decay_norm
-
-            loss += norm_loss * wdn_coeff + bn_loss * wdn_coeff
+                loss += norm_loss * wdn_coeff + bn_loss * wdn_coeff
 
         grad_scalar.scale(loss).backward()
         utils.average_gradients(model.parameters(), args.distributed)
@@ -209,7 +205,9 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
                 n = int(np.floor(np.sqrt(x.size(0))))
                 if args.dataset == 'custom':
                         output_img = utils.sample_from_softmax(output)
-                        output_tiled = utils.tile_image(output_img.unsqueeze(1), n)
+                        output_img = model.cluster_to_image(output_img)
+                        import ipdb; ipdb.set_trace()
+                        output_tiled = utils.tile_image(output_img, n)
                 else:
                     x_img = x[:n*n]
                     output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) else output.sample()
@@ -219,19 +217,13 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
                     in_out_tiled = torch.cat((x_tiled, output_tiled), dim=2)
                     writer.add_image('reconstruction', in_out_tiled, global_step)
 
-            # norm
-            writer.add_scalar('train/norm_loss', norm_loss, global_step)
-            writer.add_scalar('train/bn_loss', bn_loss, global_step)
-            writer.add_scalar('train/norm_coeff', wdn_coeff, global_step)
-
             utils.average_tensor(nelbo.avg, args.distributed)
             logging.info('train %d %f', global_step, nelbo.avg)
             writer.add_scalar('train/nelbo_avg', nelbo.avg, global_step)
             writer.add_scalar('train/lr', cnn_optimizer.state_dict()[
                               'param_groups'][0]['lr'], global_step)
             writer.add_scalar('train/nelbo_iter', loss, global_step)
-            if args.dataset == 'custom':
-                writer.add_scalar('train/recon_iter', loss, global_step)
+
         global_step += 1
 
     utils.average_tensor(nelbo.avg, args.distributed)
@@ -244,7 +236,6 @@ def test(valid_queue, model, num_samples, args, logging):
     if args.distributed:
         dist.barrier()
     nelbo_avg = utils.AvgrageMeter()
-    #neg_log_p_avg = utils.AvgrageMeter()
 
     model.eval()
     for step, x in enumerate(valid_queue):
@@ -256,7 +247,7 @@ def test(valid_queue, model, num_samples, args, logging):
         x = utils.pre_process(x, args.num_x_bits)
 
         with torch.no_grad():
-            nelbo, log_iw = [], []
+            nelbo = []
             for k in range(num_samples):
                 logits, log_q, log_p, kl_all, _ = model(x)
                 output = model.decoder_output(logits)
