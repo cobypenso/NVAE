@@ -338,10 +338,12 @@ class AutoEncoder(nn.Module):
                              Conv2D(C_in, C_out, 3, padding=1, bias=True))
 
     def forward(self, x):
-        
+        # if the dataset is 'custom' - add BLOCK that map the cluster<->image
+        # before the rest of the original net
         if self.dataset == 'custom':
             x = self.cluster_to_image(x)
             x = x.transpose(1, 3)
+
         s = self.stem(2 * x - 1.0)
 
         # perform pre-processing
@@ -487,17 +489,14 @@ class AutoEncoder(nn.Module):
         logits = self.image_conditional(s)
         return logits
 
-    def decoder_output(self, logits):
+    def decoder_output(self, logits, temp = 1):
         if self.dataset == 'mnist':
             return Bernoulli(logits=logits)
         elif self.dataset in {'cifar10', 'celeba_64', 'celeba_256', 'imagenet_32', 'imagenet_64', 'ffhq',
                               'lsun_bedroom_128', 'lsun_bedroom_256'}:
             return DiscMixLogistic(logits, self.num_mix_output, num_bits=self.num_bits)
-            ############################################################
-            # TODO - Here change to softmax instead of DiscMixLogistic #
-            ############################################################
         elif self.dataset == 'custom':
-            softmax = nn.Softmax(dim=1)(logits)
+            softmax = nn.Softmax(dim=1)(logits / temp)
             return softmax
         else:
             raise NotImplementedError

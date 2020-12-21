@@ -91,7 +91,6 @@ def main(args):
         logging.info('epoch %d', epoch)
 
         # Training.
-        
         train_nelbo, global_step = train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging)
         logging.info('train_nelbo %f', train_nelbo)
         writer.add_scalar('train/nelbo', train_nelbo, global_step)
@@ -116,7 +115,10 @@ def main(args):
                         output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) else output.sample(t)
                         output_tiled = utils.tile_image(output_img, n)
                         writer.add_image('generated_%0.1f' % t, output_tiled, global_step)
+            # test the model
             valid_nelbo = test(valid_queue, model, num_samples=10, args=args, logging=logging)
+
+            # log the current results
             logging.info('valid_nelbo %f', valid_nelbo)
             logging.info('valid bpd elbo %f', valid_nelbo * bpd_coeff)
             writer.add_scalar('val/nelbo', valid_nelbo, epoch)
@@ -176,16 +178,16 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
                 x_reshaped = x.reshape(16, -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
                 output_reshaped = output.transpose(1, 3).reshape(16, -1, 512).permute(0,2,1) # (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
                 recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
-            else:
-                recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
-            balanced_kl, kl_coeffs, kl_vals = utils.kl_balancer(kl_all, kl_coeff, kl_balance=True, alpha_i=alpha_i)
-            if args.dataset == 'custom':
                 nelbo_batch = recon_loss
             else:
+                recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
+                balanced_kl, kl_coeffs, kl_vals = utils.kl_balancer(kl_all, kl_coeff, kl_balance=True, alpha_i=alpha_i)
                 nelbo_batch = torch.mean(recon_loss + balanced_kl)
+            
             loss = nelbo_batch
             norm_loss = model.spectral_norm_parallel()
             bn_loss = model.batchnorm_loss()
+
             # get spectral regularization coefficient (lambda)
             if args.weight_decay_norm_anneal:
                 assert args.weight_decay_norm_init > 0 and args.weight_decay_norm > 0, 'init and final wdn should be positive.'
@@ -228,24 +230,8 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
             writer.add_scalar('train/lr', cnn_optimizer.state_dict()[
                               'param_groups'][0]['lr'], global_step)
             writer.add_scalar('train/nelbo_iter', loss, global_step)
-            writer.add_scalar('train/kl_iter', torch.mean(sum(kl_all)), global_step)
             if args.dataset == 'custom':
                 writer.add_scalar('train/recon_iter', loss, global_step)
-            else:
-                writer.add_scalar('train/recon_iter', torch.mean(utils.reconstruction_loss(output, x, crop=model.crop_output)), global_step)
-            writer.add_scalar('kl_coeff/coeff', kl_coeff, global_step)
-            total_active = 0
-            for i, kl_diag_i in enumerate(kl_diag):
-                utils.average_tensor(kl_diag_i, args.distributed)
-                num_active = torch.sum(kl_diag_i > 0.1).detach()
-                total_active += num_active
-
-                # kl_ceoff
-                writer.add_scalar('kl/active_%d' % i, num_active, global_step)
-                writer.add_scalar('kl_coeff/layer_%d' % i, kl_coeffs[i], global_step)
-                writer.add_scalar('kl_vals/layer_%d' % i, kl_vals[i], global_step)
-            writer.add_scalar('kl/total_active', total_active, global_step)
-
         global_step += 1
 
     utils.average_tensor(nelbo.avg, args.distributed)
@@ -259,6 +245,7 @@ def test(valid_queue, model, num_samples, args, logging):
         dist.barrier()
     nelbo_avg = utils.AvgrageMeter()
     #neg_log_p_avg = utils.AvgrageMeter()
+
     model.eval()
     for step, x in enumerate(valid_queue):
         if args.dataset != 'custom':
@@ -277,14 +264,11 @@ def test(valid_queue, model, num_samples, args, logging):
                     x_reshaped = x.reshape(16, -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
                     output_reshaped = output.transpose(1, 3).reshape(16, -1, 512).permute(0,2,1) # (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
                     recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
-                else:
-                    recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
-                balanced_kl, _, _ = utils.kl_balancer(kl_all, kl_balance=False)
-                if args.dataset == 'custom':
                     nelbo_batch = recon_loss
                 else:
+                    recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
+                    balanced_kl, _, _ = utils.kl_balancer(kl_all, kl_balance=False)
                     nelbo_batch = torch.mean(recon_loss + balanced_kl)
-                nelbo.append(nelbo_batch)
             
             if args.dataset == 'custom':
                 nelbo = torch.mean(torch.stack(nelbo, dim=0))
@@ -293,11 +277,12 @@ def test(valid_queue, model, num_samples, args, logging):
 
         nelbo_avg.update(nelbo.data, x.size(0))
 
-    utils.average_tensor(nelbo_avg.avg, args.distributed)
-    if args.distributed:
-        # block to sync
-        dist.barrier()
-    logging.info('val, step: %d, NELBO: %f', step, nelbo_avg.avg)
+        utils.average_tensor(nelbo_avg.avg, args.distributed)
+        if args.distributed:
+            # block to sync
+            dist.barrier()
+        logging.info('val, step: %d, NELBO: %f', step, nelbo_avg.avg)
+
     return nelbo_avg.avg
 
 
@@ -313,7 +298,6 @@ def init_processes(rank, size, fn, args):
 
 def cleanup():
     dist.destroy_process_group()
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('encoder decoder examiner')

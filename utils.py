@@ -497,7 +497,6 @@ def visualize_compare(x, y):
         plt.show()
         
 def visualize(x):
-    
     _, ax = plt.subplots(x.shape[0])
     for i in range(x.shape[0]):
         ax[i].imshow(x[i])
