@@ -485,9 +485,11 @@ def groups_per_scale(num_scales, num_groups_per_scale, is_adaptive, divider=2, m
             n = max(minimum_groups, n)
     return g
     
-def sample_from_softmax(softmax):
+def sample_from_softmax(softmax, num_samples = 100):
     # softmax - bt,32,32,512   ----> bt,32,32 
-    return torch.multinomial(softmax.reshape(-1, 512), 1).reshape(16, 32, 32)
+    samples = torch.multinomial(softmax.reshape(-1, 512), num_samples)
+    samples = samples.to(dtype=torch.float).mean(dim=1).to(dtype=torch.int64)
+    return samples.reshape(softmax.shape[:-1])
 
 def visualize_compare(x, y):
     for i in range(x.shape[0]):

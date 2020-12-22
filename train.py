@@ -146,9 +146,11 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
                                       groups_per_scale=model.groups_per_scale, fun='square')
     nelbo = utils.AvgrageMeter()
 
-    loss_crossentropy = nn.CrossEntropyLoss()
+    loss_crossentropy = nn.NLLLoss()
     
     model.train()
+    for param in model.parameters():
+        param.require_grad = True
     for step, x in enumerate(train_queue):
         if args.dataset != 'custom':
             x = x[0] if len(x) > 1 else x
@@ -166,13 +168,13 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
 
         cnn_optimizer.zero_grad()
         with autocast():
-            logits, log_q, log_p, kl_all, kl_diag = model(x)
+            logits, log_q, log_p, kl_all, kl_diag = model(model.custom_pre_process(x))
             output = model.decoder_output(logits)
             
             if (args.dataset == 'custom'):
                 x_reshaped = x.reshape(16, -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
-                output_reshaped = output.transpose(1, 3).reshape(16, -1, 512).permute(0,2,1) # (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
-                recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
+                output_reshaped = output.reshape(output.shape[0], -1, 512).permute(0,2,1)# (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
+                recon_loss = loss_crossentropy(torch.log(output_reshaped), x_reshaped)
                 loss = recon_loss
             else:
                 kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
@@ -192,21 +194,16 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
                     wdn_coeff = args.weight_decay_norm
 
                 loss += norm_loss * wdn_coeff + bn_loss * wdn_coeff
-        # grad_scalar.scale(loss).backward()
-        loss.backard()
-        utils.average_gradients(model.parameters(), args.distributed)
-        # grad_scalar.step(cnn_optimizer)
+        loss.backward()
         cnn_optimizer.step()
-        # grad_scalar.update()
         nelbo.update(loss.data, 1)
 
         if (global_step + 1) % 100 == 0:
-            print ('loss: ' + str(loss))
+            print ("loss: " + str(loss))
             model.eval()
             if (global_step + 1) % 1000 == 0:  # reduced frequency
                 n = int(np.floor(np.sqrt(x.size(0))))
                 if args.dataset == 'custom':
-                        import ipdb; ipdb.set_trace()
                         output_img = utils.sample_from_softmax(output)
                         output_img = model.cluster_to_image(output_img).permute(0,3,1,2)
                         output_tiled = utils.tile_image(output_img, n)
@@ -233,7 +230,7 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
 
 
 def test(valid_queue, model, num_samples, args, logging):
-    loss_crossentropy = nn.CrossEntropyLoss()
+    loss_crossentropy = nn.NLLLoss()
     
     if args.distributed:
         dist.barrier()
@@ -251,12 +248,12 @@ def test(valid_queue, model, num_samples, args, logging):
         with torch.no_grad():
             nelbo = []
             for k in range(num_samples):
-                logits, log_q, log_p, kl_all, _ = model(x)
+                logits, log_q, log_p, kl_all, _ = model(model.custom_pre_process(x))
                 output = model.decoder_output(logits)
                 if args.dataset == 'custom':
                     x_reshaped = x.reshape(16, -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
                     output_reshaped = output.transpose(1, 3).reshape(16, -1, 512).permute(0,2,1) # (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
-                    recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
+                    recon_loss = loss_crossentropy(torch.log(output_reshaped), x_reshaped)
                     nelbo_batch = recon_loss
                 else:
                     recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
@@ -266,7 +263,6 @@ def test(valid_queue, model, num_samples, args, logging):
                 nelbo.append(nelbo_batch)
                 
             if args.dataset == 'custom':
-                import ipdb; ipdb.set_trace()
                 nelbo = torch.mean(torch.stack(nelbo, dim=0))
             else:
                 nelbo = torch.mean(torch.stack(nelbo, dim=1))
@@ -312,11 +308,11 @@ if __name__ == '__main__':
     # optimization
     parser.add_argument('--batch_size', type=int, default=200,
                         help='batch size per GPU')
-    parser.add_argument('--learning_rate', type=float, default=1e-2,
+    parser.add_argument('--learning_rate', type=float, default=1e-1,
                         help='init learning rate')
     parser.add_argument('--learning_rate_min', type=float, default=1e-4,
                         help='min learning rate')
-    parser.add_argument('--weight_decay', type=float, default=3e-4,
+    parser.add_argument('--weight_decay', type=float, default=1e-6,
                         help='weight decay')
     parser.add_argument('--weight_decay_norm', type=float, default=0.,
                         help='The lambda parameter for spectral regularization.')

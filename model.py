@@ -340,9 +340,9 @@ class AutoEncoder(nn.Module):
     def forward(self, x):
         # if the dataset is 'custom' - add BLOCK that map the cluster<->image
         # before the rest of the original net
-        if self.dataset == 'custom':
-            x = self.cluster_to_image(x)
-            x = x.transpose(1, 3) # bt,32,32,3
+        #if self.dataset == 'custom':
+        #    x = self.cluster_to_image(x)
+        #    x = x.transpose(1, 3) # bt,32,32,3
             #TODO - visualize#
             #for i in range(x.shape[0]):
             #    self.writer.add_image('forward%d' %i , x[i])
@@ -499,7 +499,7 @@ class AutoEncoder(nn.Module):
                               'lsun_bedroom_128', 'lsun_bedroom_256'}:
             return DiscMixLogistic(logits, self.num_mix_output, num_bits=self.num_bits)
         elif self.dataset == 'custom':
-            softmax = nn.Softmax(dim=-1)(logits.permute(0,2,3,1) / temp)
+            softmax = nn.Softmax(dim=3)(logits.permute(0,2,3,1) / temp)
             return softmax
         else:
             raise NotImplementedError
@@ -554,3 +554,12 @@ class AutoEncoder(nn.Module):
         if (isinstance(x, torch.Tensor)):
             tmp = x.cpu().numpy()
         return torch.Tensor(datasets.clusters_to_images(tmp, pathToCluster)).cuda()
+
+    def custom_pre_process(self, x):
+        if self.dataset == 'custom':
+            x = self.cluster_to_image(x)
+            return x.transpose(1, 3) # bt,32,32,3
+        else:
+            return x
+            
+            
