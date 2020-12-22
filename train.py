@@ -37,7 +37,6 @@ def main(args):
 
     args.num_total_iter = len(train_queue) * args.epochs
     warmup_iters = len(train_queue) * args.warmup_epochs
-    swa_start = len(train_queue) * (args.epochs - 1)
 
     arch_instance = utils.get_arch_cells(args.arch_instance)
 
@@ -193,18 +192,21 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
                     wdn_coeff = args.weight_decay_norm
 
                 loss += norm_loss * wdn_coeff + bn_loss * wdn_coeff
-
-        grad_scalar.scale(loss).backward()
+        # grad_scalar.scale(loss).backward()
+        loss.backard()
         utils.average_gradients(model.parameters(), args.distributed)
-        grad_scalar.step(cnn_optimizer)
-        grad_scalar.update()
+        # grad_scalar.step(cnn_optimizer)
+        cnn_optimizer.step()
+        # grad_scalar.update()
         nelbo.update(loss.data, 1)
 
         if (global_step + 1) % 100 == 0:
+            print ('loss: ' + str(loss))
             model.eval()
             if (global_step + 1) % 1000 == 0:  # reduced frequency
                 n = int(np.floor(np.sqrt(x.size(0))))
                 if args.dataset == 'custom':
+                        import ipdb; ipdb.set_trace()
                         output_img = utils.sample_from_softmax(output)
                         output_img = model.cluster_to_image(output_img).permute(0,3,1,2)
                         output_tiled = utils.tile_image(output_img, n)
@@ -264,6 +266,7 @@ def test(valid_queue, model, num_samples, args, logging):
                 nelbo.append(nelbo_batch)
                 
             if args.dataset == 'custom':
+                import ipdb; ipdb.set_trace()
                 nelbo = torch.mean(torch.stack(nelbo, dim=0))
             else:
                 nelbo = torch.mean(torch.stack(nelbo, dim=1))
