@@ -51,10 +51,10 @@ def main(args):
     if args.fast_adamax:
         # Fast adamax has the same functionality as torch.optim.Adamax, except it is faster.
         cnn_optimizer = Adamax(model.parameters(), args.learning_rate,
-                               weight_decay=args.weight_decay, eps=1e-3)
+                               weight_decay=args.weight_decay, eps=1e-1)
     else:
         cnn_optimizer = torch.optim.Adamax(model.parameters(), args.learning_rate,
-                                           weight_decay=args.weight_decay, eps=1e-3)
+                                           weight_decay=args.weight_decay, eps=1e-1)
 
     cnn_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         cnn_optimizer, float(args.epochs - args.warmup_epochs - 1), eta_min=args.learning_rate_min)
@@ -107,11 +107,11 @@ def main(args):
                     output = model.decoder_output(logits)
                     if args.dataset == 'custom':
                         output_img = utils.sample_from_softmax(output)
-                        output_img = model.cluster_to_image(output_img)
-                        output_tiled = utils.tile_image(output_img, n)
+                        output_img = model.cluster_to_image(output_img.reshape(16, -1))
+                        for i in range(16):
+                            writer.add_image('generated_sub_image_%0.1f' % t, output_img[i].permute(2,0,1), i)
+                        output_tiled = utils.tile_image(output_img.permute(0,3,1,2), n)
                         writer.add_image('generated_%0.1f' % t, output_tiled, global_step)
-                        plt.imshow(output_tiled.squeeze().cpu().numpy())
-                        plt.savefig("./img/sample_epoch{}-temp{}.png".format(epoch, t))
                     else:
                         output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) else output.sample(t)
                         output_tiled = utils.tile_image(output_img, n)
@@ -201,12 +201,12 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
         nelbo.update(loss.data, 1)
 
         if (global_step + 1) % 100 == 0:
+            model.eval()
             if (global_step + 1) % 1000 == 0:  # reduced frequency
                 n = int(np.floor(np.sqrt(x.size(0))))
                 if args.dataset == 'custom':
                         output_img = utils.sample_from_softmax(output)
-                        output_img = model.cluster_to_image(output_img)
-                        import ipdb; ipdb.set_trace()
+                        output_img = model.cluster_to_image(output_img).permute(0,3,1,2)
                         output_tiled = utils.tile_image(output_img, n)
                 else:
                     x_img = x[:n*n]
@@ -223,7 +223,7 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
             writer.add_scalar('train/lr', cnn_optimizer.state_dict()[
                               'param_groups'][0]['lr'], global_step)
             writer.add_scalar('train/nelbo_iter', loss, global_step)
-
+            model.train()
         global_step += 1
 
     utils.average_tensor(nelbo.avg, args.distributed)
@@ -260,7 +260,9 @@ def test(valid_queue, model, num_samples, args, logging):
                     recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
                     balanced_kl, _, _ = utils.kl_balancer(kl_all, kl_balance=False)
                     nelbo_batch = torch.mean(recon_loss + balanced_kl)
-            
+                
+                nelbo.append(nelbo_batch)
+                
             if args.dataset == 'custom':
                 nelbo = torch.mean(torch.stack(nelbo, dim=0))
             else:
@@ -268,11 +270,11 @@ def test(valid_queue, model, num_samples, args, logging):
 
         nelbo_avg.update(nelbo.data, x.size(0))
 
-        utils.average_tensor(nelbo_avg.avg, args.distributed)
-        if args.distributed:
-            # block to sync
-            dist.barrier()
-        logging.info('val, step: %d, NELBO: %f', step, nelbo_avg.avg)
+    utils.average_tensor(nelbo_avg.avg, args.distributed)
+    if args.distributed:
+        # block to sync
+        dist.barrier()
+    logging.info('val, step: %d, NELBO: %f', step, nelbo_avg.avg)
 
     return nelbo_avg.avg
 

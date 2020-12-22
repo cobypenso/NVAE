@@ -486,8 +486,8 @@ def groups_per_scale(num_scales, num_groups_per_scale, is_adaptive, divider=2, m
     return g
     
 def sample_from_softmax(softmax):
-    # softmax - bt,512,32,32 ---> bt,32,32,512   ----> bt,32,32 
-    return torch.multinomial(softmax.permute(0,2,3,1).reshape(-1, 512), 1).reshape(16, 32, 32)
+    # softmax - bt,32,32,512   ----> bt,32,32 
+    return torch.multinomial(softmax.reshape(-1, 512), 1).reshape(16, 32, 32)
 
 def visualize_compare(x, y):
     for i in range(x.shape[0]):
