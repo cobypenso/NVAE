@@ -106,8 +106,8 @@ def main(args):
                     output = model.decoder_output(logits)
                     if args.dataset == 'custom':
                         output_img = utils.sample_from_softmax(output)
-                        output_img = model.cluster_to_image(output_img.reshape(16, -1))
-                        for i in range(16):
+                        output_img = model.cluster_to_image(output_img.reshape(num_samples, -1))
+                        for i in range(num_samples):
                             writer.add_image('generated_sub_image_%0.1f' % t, output_img[i].permute(2,0,1), i)
                         output_tiled = utils.tile_image(output_img.permute(0,3,1,2), n)
                         writer.add_image('generated_%0.1f' % t, output_tiled, global_step)
@@ -172,9 +172,9 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
             output = model.decoder_output(logits)
             
             if (args.dataset == 'custom'):
-                x_reshaped = x.reshape(16, -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
+                x_reshaped = x.reshape(x.shape[0], -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
                 output_reshaped = output.reshape(output.shape[0], -1, 512).permute(0,2,1)# (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
-                recon_loss = loss_crossentropy(torch.log(output_reshaped), x_reshaped)
+                recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
                 loss = recon_loss
             else:
                 kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
@@ -253,9 +253,9 @@ def test(valid_queue, model, num_samples, args, logging):
                 if args.dataset == 'custom':
                     x_reshaped = x.reshape(x.shape[0], -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
                     output_reshaped = output.reshape(output.shape[0], -1, 512).permute(0,2,1)# (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
-                    if output_reshaped.shape[0] != 16 or x_reshaped.shape[0] != 16:
+                    if output_reshaped.shape[0] != x_reshaped.shape[0]:
                         break
-                    recon_loss = loss_crossentropy(torch.log(output_reshaped), x_reshaped)
+                    recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
                     loss = recon_loss
                 else:
                     recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)

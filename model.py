@@ -499,8 +499,7 @@ class AutoEncoder(nn.Module):
                               'lsun_bedroom_128', 'lsun_bedroom_256'}:
             return DiscMixLogistic(logits, self.num_mix_output, num_bits=self.num_bits)
         elif self.dataset == 'custom':
-            softmax = nn.Softmax(dim=3)(logits.permute(0,2,3,1) / temp)
-            return softmax
+            return nn.LogSoftmax(dim=3)(logits.permute(0,2,3,1) / temp)
         else:
             raise NotImplementedError
 
