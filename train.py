@@ -251,17 +251,20 @@ def test(valid_queue, model, num_samples, args, logging):
                 logits, log_q, log_p, kl_all, _ = model(model.custom_pre_process(x))
                 output = model.decoder_output(logits)
                 if args.dataset == 'custom':
-                    x_reshaped = x.reshape(16, -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
-                    output_reshaped = output.transpose(1, 3).reshape(16, -1, 512).permute(0,2,1) # (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
+                    x_reshaped = x.reshape(x.shape[0], -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
+                    output_reshaped = output.reshape(output.shape[0], -1, 512).permute(0,2,1)# (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
+                    if output_reshaped.shape[0] != 16 or x_reshaped.shape[0] != 16:
+                        break
                     recon_loss = loss_crossentropy(torch.log(output_reshaped), x_reshaped)
-                    nelbo_batch = recon_loss
+                    loss = recon_loss
                 else:
                     recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
                     balanced_kl, _, _ = utils.kl_balancer(kl_all, kl_balance=False)
                     nelbo_batch = torch.mean(recon_loss + balanced_kl)
-                
-                nelbo.append(nelbo_batch)
-                
+                    loss = nelbo_batch
+                nelbo.append(loss)
+            if len(nelbo) == 0:
+                continue
             if args.dataset == 'custom':
                 nelbo = torch.mean(torch.stack(nelbo, dim=0))
             else:
