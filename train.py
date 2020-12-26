@@ -104,7 +104,7 @@ def main(args):
                 for t in [0.7, 0.8, 0.9, 1.0]:
                     logits = model.sample(num_samples, t)
                     output = model.decoder_output(logits)
-                    if args.dataset == 'custom':
+                    if args.dataset == 'custom' or args.dataset == 'cifar10_custom':
                         output_img = utils.sample_from_softmax(output)
                         output_img = model.cluster_to_image(output_img.reshape(num_samples, -1))
                         for i in range(num_samples):
@@ -168,10 +168,13 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
 
         cnn_optimizer.zero_grad()
         with autocast():
+            if args.dataset == 'cifar10_custom':
+                x = utils.color_quantize(x, pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy")
+
             logits, log_q, log_p, kl_all, kl_diag = model(model.custom_pre_process(x))
             output = model.decoder_output(logits)
             
-            if (args.dataset == 'custom'):
+            if (args.dataset == 'custom' or args.dataset == 'cifar10_custom'):
                 x_reshaped = x.reshape(x.shape[0], -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
                 output_reshaped = output.reshape(output.shape[0], -1, 512).permute(0,2,1)# (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
                 recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
@@ -203,7 +206,7 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
             model.eval()
             if (global_step + 1) % 1000 == 0:  # reduced frequency
                 n = int(np.floor(np.sqrt(x.size(0))))
-                if args.dataset == 'custom':
+                if args.dataset == 'custom' or args.dataset == 'cifar10_custom':
                         output_img = utils.sample_from_softmax(output)
                         output_img = model.cluster_to_image(output_img).permute(0,3,1,2)
                         output_tiled = utils.tile_image(output_img, n)
@@ -248,9 +251,12 @@ def test(valid_queue, model, num_samples, args, logging):
         with torch.no_grad():
             nelbo = []
             for k in range(num_samples):
+                if args.dataset == 'cifar10_custom':
+                    x = utils.color_quantize(x, pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy")
+
                 logits, log_q, log_p, kl_all, _ = model(model.custom_pre_process(x))
                 output = model.decoder_output(logits)
-                if args.dataset == 'custom':
+                if args.dataset == 'custom' or args.dataset == 'cifar10_custom':
                     x_reshaped = x.reshape(x.shape[0], -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
                     output_reshaped = output.reshape(output.shape[0], -1, 512).permute(0,2,1)# (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
                     if output_reshaped.shape[0] != x_reshaped.shape[0]:
@@ -265,7 +271,7 @@ def test(valid_queue, model, num_samples, args, logging):
                 nelbo.append(loss)
             if len(nelbo) == 0:
                 continue
-            if args.dataset == 'custom':
+            if args.dataset == 'custom' or args.dataset == 'cifar10_custom':
                 nelbo = torch.mean(torch.stack(nelbo, dim=0))
             else:
                 nelbo = torch.mean(torch.stack(nelbo, dim=1))
@@ -304,7 +310,7 @@ if __name__ == '__main__':
     # data
     parser.add_argument('--dataset', type=str, default='mnist',
                         choices=['cifar10', 'mnist', 'celeba_64', 'celeba_256',
-                                 'imagenet_32', 'ffhq', 'lsun_bedroom_128', 'custom'],
+                                 'imagenet_32', 'ffhq', 'lsun_bedroom_128', 'custom', 'cifar10_custom'],
                         help='which dataset to use, custom - the special dataset')
     parser.add_argument('--data', type=str, default='/tmp/nasvae/data',
                         help='location of the data corpus')

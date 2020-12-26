@@ -558,6 +558,8 @@ class AutoEncoder(nn.Module):
         if self.dataset == 'custom':
             x = self.cluster_to_image(x)
             return x.transpose(1, 3) # bt,32,32,3
+        elif self.dataset == 'cifar10_custom':
+            pass
         else:
             return x
             

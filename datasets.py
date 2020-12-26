@@ -51,7 +51,7 @@ def get_loaders(args):
 def get_loaders_eval(dataset, args):
     """Get train and valid loaders for cifar10/tiny imagenet."""
     
-    if dataset == 'cifar10':
+    if dataset == 'cifar10' or dataset == 'cifar10_custom':
         num_classes = 10
         train_transform, valid_transform = _data_transforms_cifar10(args)
         train_data = dset.CIFAR10(
@@ -298,3 +298,17 @@ def clusters_to_images(samples, pathToCluster):
     samples = [np.reshape(np.rint(127.5 * (clusters[s.astype(int).tolist()] + 1.0)), [32, 32, 3]).astype(np.float32) for s in samples]
     # samples = [np.reshape(s, [32, 32, 1]).astype(np.float32) for s in samples]
     return samples
+
+def squared_euclidean_distance(a, b):
+    b = np.transpose(b)
+    a2 = np.reduce_sum(np.square(a), axis=1, keepdims=True)
+    b2 = np.reduce_sum(np.square(b), axis=0, keepdims=True)
+    ab = np.matmul(a, b)
+    d = a2 - 2*ab + b2
+    return d
+
+def color_quantize(x, pathToCluster):
+    clusters = np.load(pathToCluster)
+    x = np.reshape(x, [-1, 3])
+    d = squared_euclidean_distance(x, clusters)
+    return np.argmin(d, 1)
