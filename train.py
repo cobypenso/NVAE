@@ -63,20 +63,22 @@ def main(args):
     bpd_coeff = 1. / np.log(2.) / num_output
 
     # if load
-    checkpoint_file = os.path.join(args.save, 'checkpoint.pt')
+    checkpoint_file = "checkpoint_wow.pt"
+    #checkpoint_file = os.path.join(args.save, 'checkpoint.pt')
     if args.cont_training:
         logging.info('loading the model.')
         checkpoint = torch.load(checkpoint_file, map_location='cpu')
         init_epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['state_dict'])
         model = model.cuda()
-        cnn_optimizer.load_state_dict(checkpoint['optimizer'])
-        grad_scalar.load_state_dict(checkpoint['grad_scalar'])
-        cnn_scheduler.load_state_dict(checkpoint['scheduler'])
-        global_step = checkpoint['global_step']
+        #cnn_optimizer.load_state_dict(checkpoint['optimizer'])
+        #grad_scalar.load_state_dict(checkpoint['grad_scalar'])
+        #cnn_scheduler.load_state_dict(checkpoint['scheduler'])
+        #global_step = checkpoint['global_step']
     else:
         global_step, init_epoch = 0, 0
-
+    
+    global_step, init_epoch = 0,0
     for epoch in range(init_epoch, args.epochs):
         # update lrs.
         if args.distributed:
@@ -131,7 +133,7 @@ def main(args):
                 torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict(),
                             'optimizer': cnn_optimizer.state_dict(), 'global_step': global_step,
                             'args': args, 'arch_instance': arch_instance, 'scheduler': cnn_scheduler.state_dict(),
-                            'grad_scalar': grad_scalar.state_dict()}, checkpoint_file)
+                            'grad_scalar': grad_scalar.state_dict()}, "checkpoint"+str(epoch)+".pt")
 
     # Final validation
     valid_nelbo = test(valid_queue, model, num_samples=1000, args=args, logging=logging)
