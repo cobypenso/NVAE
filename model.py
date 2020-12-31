@@ -329,7 +329,7 @@ class AutoEncoder(nn.Module):
         C_in = int(self.num_channels_dec * mult)
         if self.dataset == 'mnist':
             C_out = 1
-        elif self.dataset == 'custom':
+        elif self.dataset == 'custom' or self.dataset == 'cifar10_custom':
             C_out = 512
         else:
             C_out = 10 * self.num_mix_output
@@ -346,7 +346,6 @@ class AutoEncoder(nn.Module):
             #TODO - visualize#
             #for i in range(x.shape[0]):
             #    self.writer.add_image('forward%d' %i , x[i])
-
         s = self.stem(2 * x - 1.0)
 
         # perform pre-processing
@@ -498,7 +497,7 @@ class AutoEncoder(nn.Module):
         elif self.dataset in {'cifar10', 'celeba_64', 'celeba_256', 'imagenet_32', 'imagenet_64', 'ffhq',
                               'lsun_bedroom_128', 'lsun_bedroom_256'}:
             return DiscMixLogistic(logits, self.num_mix_output, num_bits=self.num_bits)
-        elif self.dataset == 'custom':
+        elif self.dataset == 'custom' or self.dataset == 'cifar10_custom':
             return nn.LogSoftmax(dim=3)(logits.permute(0,2,3,1) / temp)
         else:
             raise NotImplementedError
@@ -555,11 +554,9 @@ class AutoEncoder(nn.Module):
         return torch.Tensor(datasets.clusters_to_images(tmp, pathToCluster)).cuda()
 
     def custom_pre_process(self, x):
-        if self.dataset == 'custom':
+        if self.dataset == 'custom' or self.dataset == 'cifar10_custom':
             x = self.cluster_to_image(x)
             return x.transpose(1, 3) # bt,32,32,3
-        elif self.dataset == 'cifar10_custom':
-            pass
         else:
             return x
             

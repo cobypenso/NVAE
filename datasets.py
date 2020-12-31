@@ -301,14 +301,15 @@ def clusters_to_images(samples, pathToCluster):
 
 def squared_euclidean_distance(a, b):
     b = np.transpose(b)
-    a2 = np.reduce_sum(np.square(a), axis=1, keepdims=True)
-    b2 = np.reduce_sum(np.square(b), axis=0, keepdims=True)
+    a2 = np.sum(np.square(a), axis=1, keepdims=True)
+    b2 = np.sum(np.square(b), axis=0, keepdims=True)
     ab = np.matmul(a, b)
     d = a2 - 2*ab + b2
     return d
 
 def color_quantize(x, pathToCluster):
     clusters = np.load(pathToCluster)
-    x = np.reshape(x, [-1, 3])
-    d = squared_euclidean_distance(x, clusters)
-    return np.argmin(d, 1)
+    y = np.reshape(x, [-1, 3])
+    d = squared_euclidean_distance(y, clusters)
+    tmp = np.argmin(d, 1)
+    return tmp.reshape(x.shape[0], -1)

@@ -63,7 +63,8 @@ def main(args):
     bpd_coeff = 1. / np.log(2.) / num_output
 
     # if load
-    checkpoint_file = os.path.join(args.save, 'checkpoint.pt')
+    checkpoint_file = "checkpoint_wow.pt"
+    #checkpoint_file = os.path.join(args.save, 'checkpoint.pt')
     if args.cont_training:
         logging.info('loading the model.')
         checkpoint = torch.load(checkpoint_file, map_location='cpu')
@@ -93,7 +94,7 @@ def main(args):
         train_nelbo, global_step = train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging)
         logging.info('train_nelbo %f', train_nelbo)
         writer.add_scalar('train/nelbo', train_nelbo, global_step)
-
+            
         model.eval()
         # generate samples less frequently
         eval_freq = 1 if args.epochs <= 50 else 20
@@ -169,8 +170,10 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
         cnn_optimizer.zero_grad()
         with autocast():
             if args.dataset == 'cifar10_custom':
-                x = utils.color_quantize(x, pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy")
-
+                
+                x = datasets.color_quantize(x.cpu().numpy(), pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy")
+                x = torch.from_numpy(x).cuda()
+            
             logits, log_q, log_p, kl_all, kl_diag = model(model.custom_pre_process(x))
             output = model.decoder_output(logits)
             
@@ -252,16 +255,16 @@ def test(valid_queue, model, num_samples, args, logging):
             nelbo = []
             for k in range(num_samples):
                 if args.dataset == 'cifar10_custom':
-                    x = utils.color_quantize(x, pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy")
-
-                logits, log_q, log_p, kl_all, _ = model(model.custom_pre_process(x))
+                    y = datasets.color_quantize(x.cpu().numpy(), pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy")
+                    y = torch.from_numpy(y).cuda()
+                logits, log_q, log_p, kl_all, _ = model(model.custom_pre_process(y))
                 output = model.decoder_output(logits)
                 if args.dataset == 'custom' or args.dataset == 'cifar10_custom':
-                    x_reshaped = x.reshape(x.shape[0], -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
+                    y_reshaped = y.reshape(y.shape[0], -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
                     output_reshaped = output.reshape(output.shape[0], -1, 512).permute(0,2,1)# (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
-                    if output_reshaped.shape[0] != x_reshaped.shape[0]:
+                    if output_reshaped.shape[0] != y_reshaped.shape[0]:
                         break
-                    recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
+                    recon_loss = loss_crossentropy(output_reshaped, y_reshaped)
                     loss = recon_loss
                 else:
                     recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
