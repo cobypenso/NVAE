@@ -295,11 +295,11 @@ class CustomDataset(VisionDataset):
 
 def clusters_to_images(samples, pathToCluster):
     clusters = np.load(pathToCluster)
-    samples = [np.reshape(np.rint(127.5 * (clusters[s.astype(int).tolist()] + 1.0)), [32, 32, 3]).astype(np.float32) for s in samples]
-    # samples = [np.reshape(s, [32, 32, 1]).astype(np.float32) for s in samples]
+    samples = clusters[samples]
+    #samples = [np.reshape(np.rint(127.5 * (clusters[s.astype(int).tolist()] + 1.0)), [32, 32, 3]).astype(np.float32) for s in samples]
     return samples
 
-def squared_euclidean_distance(a, b):
+def squared_euclidean_distance(a, b):    
     b = np.transpose(b)
     a2 = np.sum(np.square(a), axis=1, keepdims=True)
     b2 = np.sum(np.square(b), axis=0, keepdims=True)
@@ -309,7 +309,7 @@ def squared_euclidean_distance(a, b):
 
 def color_quantize(x, pathToCluster):
     clusters = np.load(pathToCluster)
-    y = np.reshape(x, [-1, 3])
+    y = x.permute(0,2,3,1).cpu().numpy().reshape(-1, 3)
     d = squared_euclidean_distance(y, clusters)
     tmp = np.argmin(d, 1)
     return tmp.reshape(x.shape[0], -1)

@@ -89,7 +89,6 @@ def main(args):
 
         # Logging.
         logging.info('epoch %d', epoch)
-
         # Training.
         train_nelbo, global_step = train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging)
         logging.info('train_nelbo %f', train_nelbo)
@@ -107,7 +106,7 @@ def main(args):
                     output = model.decoder_output(logits)
                     if args.dataset == 'custom' or args.dataset == 'cifar10_custom':
                         output_img = utils.sample_from_softmax(output)
-                        output_img = model.cluster_to_image(output_img.reshape(num_samples, -1))
+                        output_img = model.cluster_to_image(output_img.reshape(num_samples, -1)).reshape(16, 32,32,3)
                         for i in range(num_samples):
                             writer.add_image('generated_sub_image_%0.1f' % t, output_img[i].permute(2,0,1), i)
                         output_tiled = utils.tile_image(output_img.permute(0,3,1,2), n)
@@ -142,6 +141,18 @@ def main(args):
     writer.close()
 
 
+def sanity_check(x):
+    y = datasets.color_quantize(x, pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/cifar10_centroids.npy")
+    z = datasets.clusters_to_images(y, pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/cifar10_centroids.npy")
+    
+    if z == x:
+        print ("Mapping working")
+        return True
+    else:
+        print("Mapping is incorrect")
+        return False
+    
+         
 def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging):
     alpha_i = utils.kl_balancer_coeff(num_scales=model.num_latent_scales,
                                       groups_per_scale=model.groups_per_scale, fun='square')
@@ -155,9 +166,11 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
     for step, x in enumerate(train_queue):
         if args.dataset != 'custom':
             x = x[0] if len(x) > 1 else x
+        
         x = x.cuda()
         # change bit length
         x = utils.pre_process(x, args.num_x_bits)
+        
         # warm-up lr
         if global_step < warmup_iters:
             lr = args.learning_rate * float(global_step) / warmup_iters
@@ -171,9 +184,9 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
         with autocast():
             if args.dataset == 'cifar10_custom':
                 
-                x = datasets.color_quantize(x.cpu().numpy(), pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy")
+                x = datasets.color_quantize(x, pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/cifar10_centroids.npy")
+                x = np.reshape(x, (x.shape[0], 32, 32))
                 x = torch.from_numpy(x).cuda()
-            
             logits, log_q, log_p, kl_all, kl_diag = model(model.custom_pre_process(x))
             output = model.decoder_output(logits)
             
@@ -211,7 +224,7 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
                 n = int(np.floor(np.sqrt(x.size(0))))
                 if args.dataset == 'custom' or args.dataset == 'cifar10_custom':
                         output_img = utils.sample_from_softmax(output)
-                        output_img = model.cluster_to_image(output_img).permute(0,3,1,2)
+                        output_img = model.cluster_to_image(output_img).permute(0,3,1,2).reshape(output_img.shape[0], 32, 32, 3)
                         output_tiled = utils.tile_image(output_img, n)
                 else:
                     x_img = x[:n*n]
@@ -247,7 +260,7 @@ def test(valid_queue, model, num_samples, args, logging):
         if args.dataset != 'custom':
             x = x[0] if len(x) > 1 else x
         x = x.cuda()
-
+        
         # change bit length
         x = utils.pre_process(x, args.num_x_bits)
 
@@ -255,7 +268,8 @@ def test(valid_queue, model, num_samples, args, logging):
             nelbo = []
             for k in range(num_samples):
                 if args.dataset == 'cifar10_custom':
-                    y = datasets.color_quantize(x.cpu().numpy(), pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/kmeans_centers.npy")
+                    y = datasets.color_quantize(x, pathToCluster = r"/home/dsi/coby_penso/projects/generative_models/NVAE/cifar10_centroids.npy")
+                    y = np.reshape(y, (x.shape[0], 32, 32))
                     y = torch.from_numpy(y).cuda()
                 logits, log_q, log_p, kl_all, _ = model(model.custom_pre_process(y))
                 output = model.decoder_output(logits)
