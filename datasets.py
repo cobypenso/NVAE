@@ -292,9 +292,18 @@ class CustomDataset(VisionDataset):
         if self.transform:
             img = self.transform(img)
         return img
-
+'''
 def clusters_to_images(samples, pathToCluster):
     clusters = np.load(pathToCluster)
     samples = [np.reshape(np.rint(127.5 * (clusters[s.astype(int).tolist()] + 1.0)), [32, 32, 3]).astype(np.float32) for s in samples]
     # samples = [np.reshape(s, [32, 32, 1]).astype(np.float32) for s in samples]
     return samples
+'''   
+def clusters_to_images(samples, pathToCluster):
+
+    data_tor = torch.reshape(torch.from_numpy(samples), [-1, 32, 32])
+    clusters = torch.from_numpy(np.load(pathToCluster)).float()
+    sample_new = torch.round(127.5 * (clusters[data_tor.long()] + 1.0))
+    sample_new = sample_new.permute(0, 3, 1, 2).contiguous()
+
+    return sample_new

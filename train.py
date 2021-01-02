@@ -71,14 +71,13 @@ def main(args):
         init_epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['state_dict'])
         model = model.cuda()
-        #cnn_optimizer.load_state_dict(checkpoint['optimizer'])
-        #grad_scalar.load_state_dict(checkpoint['grad_scalar'])
-        #cnn_scheduler.load_state_dict(checkpoint['scheduler'])
-        #global_step = checkpoint['global_step']
+        cnn_optimizer.load_state_dict(checkpoint['optimizer'])
+        grad_scalar.load_state_dict(checkpoint['grad_scalar'])
+        cnn_scheduler.load_state_dict(checkpoint['scheduler'])
+        global_step = checkpoint['global_step']
     else:
         global_step, init_epoch = 0, 0
     
-    global_step, init_epoch = 0,0
     for epoch in range(init_epoch, args.epochs):
         # update lrs.
         if args.distributed:
@@ -110,8 +109,8 @@ def main(args):
                         output_img = utils.sample_from_softmax(output)
                         output_img = model.cluster_to_image(output_img.reshape(num_samples, -1))
                         for i in range(num_samples):
-                            writer.add_image('generated_sub_image_%0.1f' % t, output_img[i].permute(2,0,1), i)
-                        output_tiled = utils.tile_image(output_img.permute(0,3,1,2), n)
+                            writer.add_image('generated_sub_image_%0.1f' % t, output_img[i], i)
+                        output_tiled = utils.tile_image(output_img, n)
                         writer.add_image('generated_%0.1f' % t, output_tiled, global_step)
                     else:
                         output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) else output.sample(t)
@@ -167,14 +166,16 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
         # sync parameters, it may not be necessary
         if step % 100 == 0:
             utils.average_params(model.parameters(), args.distributed)
-
         cnn_optimizer.zero_grad()
         with autocast():
-            logits, log_q, log_p, kl_all, kl_diag = model(model.custom_pre_process(x))
+            y = model.custom_pre_process(x)
+            
+            utils.plot_images_grid(y, "sample_train.png")
+            logits, log_q, log_p, kl_all, kl_diag = model(y)
             output = model.decoder_output(logits)
             
             if (args.dataset == 'custom'):
-                x_reshaped = x.reshape(x.shape[0], -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
+                x_reshaped = x.view(x.shape[0], -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
                 output_reshaped = output.reshape(output.shape[0], -1, 512).permute(0,2,1)# (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
                 recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
                 loss = recon_loss
@@ -194,7 +195,7 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
                     wdn_coeff = np.exp(wdn_coeff)
                 else:
                     wdn_coeff = args.weight_decay_norm
-
+                import ipdb; ipdb.set_trace()
                 loss += norm_loss * wdn_coeff + bn_loss * wdn_coeff
         loss.backward()
         cnn_optimizer.step()

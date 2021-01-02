@@ -96,11 +96,14 @@ def main(eval_args):
                 start = time()
                 with autocast():
                     logits = model.sample(num_samples, eval_args.temp)
-                output = model.decoder_output(logits)
+                    output = model.decoder_output(logits)
                 if args.dataset == 'custom':
-                    output_img = utils.sample_with_tmp(output)
-                    output_img = model.cluster_to_image(output_img).permute(0,3,1,2)
-                    output_img = utils.tile_image(output_img, n)
+                    output_img = utils.sample_from_softmax(output)
+                    #output_img = output
+                    import ipdb; ipdb.set_trace()
+                    output_img = model.cluster_to_image(output_img)
+                    
+                    utils.plot_images_grid(x = output_img, export_img = "sample.png")
                 else:
                     output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) \
                         else output.sample()
@@ -111,9 +114,6 @@ def main(eval_args):
                 end = time()
                 
                 logging.info('sampling time per batch: %0.3f sec', (end - start))
-
-                plt.imshow(output_tiled)
-                plt.savefig("img/evaluate.png")
 
 
 if __name__ == '__main__':

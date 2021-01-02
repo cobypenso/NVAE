@@ -556,8 +556,10 @@ class AutoEncoder(nn.Module):
 
     def custom_pre_process(self, x):
         if self.dataset == 'custom':
-            x = self.cluster_to_image(x)
-            return x.transpose(1, 3) # bt,32,32,3
+            x = self.cluster_to_image(x).cuda()
+            
+            #return x.transpose(1, 3) # bt,32,32,3
+            return x
         else:
             return x
             
