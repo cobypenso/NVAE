@@ -91,7 +91,10 @@ def main(args):
         logging.info('epoch %d', epoch)
 
         # Training.
-        train_nelbo, global_step = train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging)
+        if epoch < 0:
+            train_nelbo, global_step = train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging, True)
+        else:
+            train_nelbo, global_step = train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging, False)
         logging.info('train_nelbo %f', train_nelbo)
         writer.add_scalar('train/nelbo', train_nelbo, global_step)
 
@@ -125,8 +128,8 @@ def main(args):
             writer.add_scalar('val/nelbo', valid_nelbo, epoch)
             writer.add_scalar('val/bpd_elbo', valid_nelbo * bpd_coeff, epoch)
 
-        save_freq = int(np.ceil(args.epochs / 100))
-        if epoch % save_freq == 0 or epoch == (args.epochs - 1):
+        save_freq = int(np.ceil(args.epochs / 100)) + 10
+        if epoch % 10 == 0 or epoch == (args.epochs - 1):
             if args.global_rank == 0:
                 logging.info('saving the model.')
                 torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict(),
@@ -142,12 +145,12 @@ def main(args):
     writer.close()
 
 
-def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging):
+def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging, without_kl = False):
     alpha_i = utils.kl_balancer_coeff(num_scales=model.num_latent_scales,
                                       groups_per_scale=model.groups_per_scale, fun='square')
     nelbo = utils.AvgrageMeter()
 
-    loss_crossentropy = nn.NLLLoss()
+    loss_crossentropy = nn.NLLLoss(reduction = 'none')
     
     model.train()
     for param in model.parameters():
@@ -156,6 +159,7 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
         if args.dataset != 'custom':
             x = x[0] if len(x) > 1 else x
         x = x.cuda()
+        
         # change bit length
         x = utils.pre_process(x, args.num_x_bits)
         # warm-up lr
@@ -168,18 +172,32 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
             utils.average_params(model.parameters(), args.distributed)
         cnn_optimizer.zero_grad()
         with autocast():
-            y = model.custom_pre_process(x)
             
-            utils.plot_images_grid(y, "sample_train.png")
+            y = model.custom_pre_process(x) #[32*32]
+            #y = (y / 256)   # y - [3,32,32]
+            #utils.plot_images_grid(y, "sample_train.png")
             logits, log_q, log_p, kl_all, kl_diag = model(y)
             output = model.decoder_output(logits)
+            #y = utils.sample_from_softmax(output)
+            #y = model.custom_pre_process(y)
+            #utils.plot_images_grid(y, "sample_train_output.png")
             
             if (args.dataset == 'custom'):
+            
                 x_reshaped = x.view(x.shape[0], -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
                 output_reshaped = output.reshape(output.shape[0], -1, 512).permute(0,2,1)# (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
-                recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
-                loss = recon_loss
+                recon_loss = torch.sum(loss_crossentropy(output_reshaped, x_reshaped), dim=1)
+                #loss = recon_loss
+                if without_kl:
+                    loss = torch.mean(recon_loss)
+                else:
+                    kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
+                                        args.kl_const_portion * args.num_total_iter, args.kl_const_coeff) 
+                    balanced_kl, kl_coeffs, kl_vals = utils.kl_balancer(kl_all, kl_coeff, kl_balance=True, alpha_i=alpha_i)
+                    loss = torch.mean(recon_loss + balanced_kl)
+                
             else:
+                
                 kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
                                         args.kl_const_portion * args.num_total_iter, args.kl_const_coeff)    
                 recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
@@ -187,6 +205,7 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
                 nelbo_batch = torch.mean(recon_loss + balanced_kl)
                 norm_loss = model.spectral_norm_parallel()
                 bn_loss = model.batchnorm_loss()
+                import ipdb; ipdb.set_trace()
                 loss = nelbo_batch
                 # get spectral regularization coefficient (lambda)
                 if args.weight_decay_norm_anneal:
@@ -202,6 +221,7 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
         nelbo.update(loss.data, 1)
 
         if (global_step + 1) % 100 == 0:
+            #import ipdb; ipdb.set_trace()
             print ("loss: " + str(loss))
             model.eval()
             if (global_step + 1) % 1000 == 0:  # reduced frequency
@@ -338,9 +358,9 @@ if __name__ == '__main__':
     # KL annealing
     parser.add_argument('--kl_anneal_portion', type=float, default=0.3,
                         help='The portions epochs that KL is annealed')
-    parser.add_argument('--kl_const_portion', type=float, default=0.0001,
+    parser.add_argument('--kl_const_portion', type=float, default=1e-4,
                         help='The portions epochs that KL is constant at kl_const_coeff')
-    parser.add_argument('--kl_const_coeff', type=float, default=0.0001,
+    parser.add_argument('--kl_const_coeff', type=float, default=1e-4,
                         help='The constant value used for min KL coeff')
     # Flow params
     parser.add_argument('--num_nf', type=int, default=0,

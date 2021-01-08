@@ -63,7 +63,6 @@ def main(eval_args):
     # did not have this variable.
     model.load_state_dict(checkpoint['state_dict'], strict=False)
     model = model.cuda()
-
     logging.info('args = %s', args)
     logging.info('num conv layers: %d', len(model.all_conv_layers))
     logging.info('param size = %fM ', utils.count_parameters_in_M(model))
@@ -95,21 +94,22 @@ def main(eval_args):
                 torch.cuda.synchronize()
                 start = time()
                 with autocast():
+                    model.eval()
                     logits = model.sample(num_samples, eval_args.temp)
                     output = model.decoder_output(logits)
-                if args.dataset == 'custom':
-                    output_img = utils.sample_from_softmax(output)
-                    #output_img = output
-                    import ipdb; ipdb.set_trace()
-                    output_img = model.cluster_to_image(output_img)
-                    
-                    utils.plot_images_grid(x = output_img, export_img = "sample.png")
-                else:
-                    output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) \
-                        else output.sample()
-                    output_tiled = utils.tile_image(output_img, n).cpu().numpy().transpose(1, 2, 0)
-                    output_tiled = np.asarray(output_tiled * 255, dtype=np.uint8)
-                    output_tiled = np.squeeze(output_tiled)
+                    if args.dataset == 'custom':
+                        y = utils.sample_from_softmax(output)
+                        
+                        y = model.custom_pre_process(y)
+                        
+                        utils.plot_images_grid(y, "sample.png")
+                    else:
+                        output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) \
+                            else output.sample()
+                        utils.plot_images_grid(output_img, "sample.png")
+                        output_tiled = utils.tile_image(output_img, n).cpu().numpy().transpose(1, 2, 0)
+                        output_tiled = np.asarray(output_tiled * 255, dtype=np.uint8)
+                        output_tiled = np.squeeze(output_tiled)
                 torch.cuda.synchronize()
                 end = time()
                 

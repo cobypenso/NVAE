@@ -222,7 +222,7 @@ def kl_balancer(kl_all, kl_coeff=1.0, kl_balance=False, alpha_i=None):
         kl_vals = torch.mean(kl_all, dim=0)
         kl = torch.sum(kl_all, dim=1)
         kl_coeffs = torch.ones(size=(len(kl_vals),))
-
+        
     return kl_coeff * kl, kl_coeffs, kl_vals
 
 
@@ -488,9 +488,10 @@ def groups_per_scale(num_scales, num_groups_per_scale, is_adaptive, divider=2, m
     
 def sample_from_softmax(softmax, num_samples = 1):
     # softmax - bt,32,32,512   ----> bt,32,32 
-    samples = torch.multinomial(torch.squeeze(torch.exp(softmax)), num_samples)
-    #samples = samples.to(dtype=torch.float).mean(dim=1).to(dtype=torch.int64)
-    import ipdb; ipdb.set_trace()
+    samples = torch.multinomial(torch.squeeze(torch.exp(softmax.view(-1, 512))), num_samples, replacement=True)
+    
+    samples = samples.to(dtype=torch.float).mean(dim=1).to(dtype=torch.int64)
+    
     return samples.view(softmax.shape[:-1])
 
 def visualize_compare(x, y):
@@ -509,7 +510,6 @@ def visualize(x):
 def plot_images_grid(x: torch.tensor, export_img, title: str = '', nrow=8, padding=2, normalize=True, pad_value=0):
     """Plot 4D Tensor of images of shape (B x C x H x W) as a grid."""
     grid = torchvision.utils.make_grid(x, nrow=nrow, padding=padding, normalize=normalize, pad_value=pad_value)
-    import ipdb; ipdb.set_trace()
     npgrid = grid.cpu().numpy()
     im = np.transpose(npgrid, (1, 2, 0))
     plt.imsave(export_img,im)

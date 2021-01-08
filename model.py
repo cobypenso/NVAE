@@ -338,15 +338,6 @@ class AutoEncoder(nn.Module):
                              Conv2D(C_in, C_out, 3, padding=1, bias=True))
 
     def forward(self, x):
-        # if the dataset is 'custom' - add BLOCK that map the cluster<->image
-        # before the rest of the original net
-        #if self.dataset == 'custom':
-        #    x = self.cluster_to_image(x)
-        #    x = x.transpose(1, 3) # bt,32,32,3
-            #TODO - visualize#
-            #for i in range(x.shape[0]):
-            #    self.writer.add_image('forward%d' %i , x[i])
-
         s = self.stem(2 * x - 1.0)
 
         # perform pre-processing
@@ -395,6 +386,7 @@ class AutoEncoder(nn.Module):
 
         idx_dec = 0
         s = self.prior_ftr0.unsqueeze(0)
+        
         batch_size = z.size(0)
         s = s.expand(batch_size, -1, -1, -1)
         for cell in self.dec_tower:
@@ -408,6 +400,7 @@ class AutoEncoder(nn.Module):
                     ftr = combiner_cells_enc[idx_dec - 1](combiner_cells_s[idx_dec - 1], s)
                     param = self.enc_sampler[idx_dec](ftr)
                     mu_q, log_sig_q = torch.chunk(param, 2, dim=1)
+
                     dist = Normal(mu_p + mu_q, log_sig_p + log_sig_q) if self.res_dist else Normal(mu_q, log_sig_q)
                     z, _ = dist.sample()
                     log_q_conv = dist.log_p(z)
@@ -455,15 +448,16 @@ class AutoEncoder(nn.Module):
             log_p += torch.sum(log_p_conv, dim=[1, 2, 3])
 
         return logits, log_q, log_p, kl_all, kl_diag
-
+        
     def sample(self, num_samples, t):
         scale_ind = 0
         z0_size = [num_samples] + self.z0_size
-        dist = Normal(mu=torch.zeros(z0_size).cuda(), log_sigma=torch.zeros(z0_size).cuda(), temp=t)
+        dist = Normal(mu=torch.zeros(z0_size).cuda(), log_sigma=torch.ones(z0_size).cuda(), temp=t)
         z, _ = dist.sample()
 
         idx_dec = 0
         s = self.prior_ftr0.unsqueeze(0)
+        
         batch_size = z.size(0)
         s = s.expand(batch_size, -1, -1, -1)
         for cell in self.dec_tower:
@@ -557,8 +551,6 @@ class AutoEncoder(nn.Module):
     def custom_pre_process(self, x):
         if self.dataset == 'custom':
             x = self.cluster_to_image(x).cuda()
-            
-            #return x.transpose(1, 3) # bt,32,32,3
             return x
         else:
             return x
