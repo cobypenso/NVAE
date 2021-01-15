@@ -63,7 +63,7 @@ def main(args):
     bpd_coeff = 1. / np.log(2.) / num_output
 
     # if load
-    checkpoint_file = "checkpoint_wow.pt"
+    checkpoint_file = "checkpoint219klanneal0.001batch16dec_ch64enc_ch64.pt"
     #checkpoint_file = os.path.join(args.save, 'checkpoint.pt')
     if args.cont_training:
         logging.info('loading the model.')
@@ -91,19 +91,16 @@ def main(args):
         logging.info('epoch %d', epoch)
 
         # Training.
-        if epoch < 0:
-            train_nelbo, global_step = train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging, True)
-        else:
-            train_nelbo, global_step = train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging, False)
+        train_nelbo, global_step = train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging)
         logging.info('train_nelbo %f', train_nelbo)
         writer.add_scalar('train/nelbo', train_nelbo, global_step)
-
+        
         model.eval()
         # generate samples less frequently
         eval_freq = 1 if args.epochs <= 50 else 20
         if epoch % eval_freq == 0 or epoch == (args.epochs - 1):
             with torch.no_grad():
-                num_samples = 16
+                num_samples = args.batch_size
                 n = int(np.floor(np.sqrt(num_samples)))
                 for t in [0.7, 0.8, 0.9, 1.0]:
                     logits = model.sample(num_samples, t)
@@ -129,13 +126,15 @@ def main(args):
             writer.add_scalar('val/bpd_elbo', valid_nelbo * bpd_coeff, epoch)
 
         save_freq = int(np.ceil(args.epochs / 100)) + 10
-        if epoch % 10 == 0 or epoch == (args.epochs - 1):
+        if epoch % 50 == 0 or epoch == (args.epochs - 1):
+        #if True:
             if args.global_rank == 0:
+                name_checkpoint = "checkpoint" + str(epoch) + "klanneal" + str(args.kl_anneal_portion) + "batch" + str(args.batch_size)+"dec_ch" + str(args.num_channels_dec) + "enc_ch" + str(args.num_channels_enc) + ".pt"
                 logging.info('saving the model.')
                 torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict(),
                             'optimizer': cnn_optimizer.state_dict(), 'global_step': global_step,
                             'args': args, 'arch_instance': arch_instance, 'scheduler': cnn_scheduler.state_dict(),
-                            'grad_scalar': grad_scalar.state_dict()}, "checkpoint"+str(epoch)+".pt")
+                            'grad_scalar': grad_scalar.state_dict()}, name_checkpoint)
 
     # Final validation
     valid_nelbo = test(valid_queue, model, num_samples=1000, args=args, logging=logging)
@@ -145,7 +144,7 @@ def main(args):
     writer.close()
 
 
-def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging, without_kl = False):
+def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_iters, writer, logging):
     alpha_i = utils.kl_balancer_coeff(num_scales=model.num_latent_scales,
                                       groups_per_scale=model.groups_per_scale, fun='square')
     nelbo = utils.AvgrageMeter()
@@ -175,7 +174,6 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
             
             y = model.custom_pre_process(x) #[32*32]
             #y = (y / 256)   # y - [3,32,32]
-            #utils.plot_images_grid(y, "sample_train.png")
             logits, log_q, log_p, kl_all, kl_diag = model(y)
             output = model.decoder_output(logits)
             #y = utils.sample_from_softmax(output)
@@ -187,15 +185,14 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
                 x_reshaped = x.view(x.shape[0], -1).to(dtype=torch.int64) # (batchsize, 32, 32, 512) for custom dataset case  --> (bt*32*32,512)
                 output_reshaped = output.reshape(output.shape[0], -1, 512).permute(0,2,1)# (batchsize, 32, 32, 512) dims of x  --> (bt*32*32)
                 recon_loss = torch.sum(loss_crossentropy(output_reshaped, x_reshaped), dim=1)
-                #loss = recon_loss
-                if without_kl:
-                    loss = torch.mean(recon_loss)
-                else:
-                    kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
-                                        args.kl_const_portion * args.num_total_iter, args.kl_const_coeff) 
-                    balanced_kl, kl_coeffs, kl_vals = utils.kl_balancer(kl_all, kl_coeff, kl_balance=True, alpha_i=alpha_i)
-                    loss = torch.mean(recon_loss + balanced_kl)
+                kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
+                                    args.kl_const_portion * args.num_total_iter, args.kl_const_coeff) 
+                balanced_kl, kl_coeffs, kl_vals = utils.kl_balancer(kl_all, kl_coeff, kl_balance=True, alpha_i=alpha_i)
+                loss = torch.mean(recon_loss + balanced_kl)
                 
+                
+                y = utils.sample_from_softmax(output)
+                y = model.custom_pre_process(y)
             else:
                 
                 kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
@@ -245,6 +242,8 @@ def train(train_queue, model, cnn_optimizer, grad_scalar, global_step, warmup_it
             writer.add_scalar('train/lr', cnn_optimizer.state_dict()[
                               'param_groups'][0]['lr'], global_step)
             writer.add_scalar('train/nelbo_iter', loss, global_step)
+            writer.add_scalar('train/kl_coeff', kl_coeff, global_step)
+            writer.add_scalar('train/kl', torch.mean(balanced_kl) / kl_coeff, global_step)
             model.train()
         global_step += 1
 
@@ -280,6 +279,7 @@ def test(valid_queue, model, num_samples, args, logging):
                         break
                     recon_loss = loss_crossentropy(output_reshaped, x_reshaped)
                     loss = recon_loss
+                    output = model.custom_pre_process(output)
                 else:
                     recon_loss = utils.reconstruction_loss(output, x, crop=model.crop_output)
                     balanced_kl, _, _ = utils.kl_balancer(kl_all, kl_balance=False)

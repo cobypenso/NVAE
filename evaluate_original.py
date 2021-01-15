@@ -63,6 +63,7 @@ def main(eval_args):
     # did not have this variable.
     model.load_state_dict(checkpoint['state_dict'], strict=False)
     model = model.cuda()
+
     logging.info('args = %s', args)
     logging.info('num conv layers: %d', len(model.all_conv_layers))
     logging.info('param size = %fM ', utils.count_parameters_in_M(model))
@@ -80,9 +81,11 @@ def main(eval_args):
         num_output = utils.num_output(args.dataset)
         bpd_coeff = 1. / np.log(2.) / num_output
 
-        valid_nelbo = test(valid_queue, model, num_samples=eval_args.num_iw_samples, args=args, logging=logging)
+        valid_neg_log_p, valid_nelbo = test(valid_queue, model, num_samples=eval_args.num_iw_samples, args=args, logging=logging)
         logging.info('final valid nelbo %f', valid_nelbo)
+        logging.info('final valid neg log p %f', valid_neg_log_p)
         logging.info('final valid nelbo in bpd %f', valid_nelbo * bpd_coeff)
+        logging.info('final valid neg log p in bpd %f', valid_neg_log_p * bpd_coeff)
 
     else:
         bn_eval_mode = not eval_args.readjust_bn
@@ -94,24 +97,20 @@ def main(eval_args):
                 torch.cuda.synchronize()
                 start = time()
                 with autocast():
-                    model.eval()
                     logits = model.sample(num_samples, eval_args.temp)
-                    output = model.decoder_output(logits)
-                    if args.dataset == 'custom':
-                        y = utils.sample_from_softmax(output)
-                        y = model.custom_pre_process(y)
-                        utils.plot_images_grid(y, "sample.png")
-                    else:
-                        output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) \
-                            else output.sample()
-                        utils.plot_images_grid(output_img, "sample.png")
-                        output_tiled = utils.tile_image(output_img, n).cpu().numpy().transpose(1, 2, 0)
-                        output_tiled = np.asarray(output_tiled * 255, dtype=np.uint8)
-                        output_tiled = np.squeeze(output_tiled)
+                output = model.decoder_output(logits)
+                output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) \
+                    else output.sample()
                 torch.cuda.synchronize()
                 end = time()
-                
+
+                output_tiled = utils.tile_image(output_img, n).cpu().numpy().transpose(1, 2, 0)
                 logging.info('sampling time per batch: %0.3f sec', (end - start))
+                output_tiled = np.asarray(output_tiled * 255, dtype=np.uint8)
+                output_tiled = np.squeeze(output_tiled)
+
+                plt.imshow(output_tiled)
+                plt.savefig('sample_origianl_cifar.jpg')
 
 
 if __name__ == '__main__':
